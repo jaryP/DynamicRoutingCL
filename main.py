@@ -17,7 +17,8 @@ from avalanche.benchmarks.utils.data_loader import ReplayDataLoader
 from avalanche.core import SupervisedPlugin
 from avalanche.evaluation.metrics import accuracy_metrics, bwt_metrics
 from avalanche.logging import TextLogger
-from avalanche.models import MultiTaskModule, IncrementalClassifier
+from avalanche.models import MultiTaskModule, IncrementalClassifier, \
+    avalanche_forward
 from avalanche.training.plugins import EvaluationPlugin
 from avalanche.training.plugins.evaluation import default_evaluator
 from avalanche.training.templates import SupervisedTemplate
@@ -38,7 +39,7 @@ from layers import MoERoutingLayer, DynamicMoERoutingLayer
 
 
 # from utils import calculate_similarity, calculate_distance
-
+avalanche_forward
 
 def clone_module(module, memo=None):
     """
@@ -267,8 +268,8 @@ class CentroidsMatching(SupervisedPlugin):
                                      tid,
                                      top_k=self.top_k)
 
-        if tid > 0:
-            self.past_model = clone_module(strategy.model)
+        # if tid > 0:
+        self.past_model = clone_module(strategy.model)
 
     @torch.no_grad()
     def update_memory(self, dataset, t, batch_size):
@@ -297,6 +298,15 @@ class CentroidsMatching(SupervisedPlugin):
 
         if tid == 0 and strategy.is_finetuning:
             return
+
+        if tid > 0:
+            _x = strategy.mb_x[~mask]
+            past_routing = self.past_model.routing_model(_x)
+            current_routing = strategy.model.current_routing[~mask]
+
+            distance = 1 - cosine_similarity(current_routing, past_routing)
+
+            strategy.loss += distance.mean(0) * 0.5
 
         if not self.per_sample_routing_reg or tid == 0:
             for name, module in strategy.model.named_modules():
@@ -423,7 +433,8 @@ class CentroidsMatching(SupervisedPlugin):
 
         if not self.per_sample_routing_reg or tid == 0:
             for name, module in strategy.model.named_modules():
-                if isinstance(module, (MoERoutingLayer, DynamicMoERoutingLayer)):
+                if isinstance(module,
+                              (MoERoutingLayer, DynamicMoERoutingLayer)):
                     weights, similarity = module.last_distribution
 
                     similarity = torch.log_softmax(similarity, -1)
@@ -478,7 +489,8 @@ class CentroidsMatching(SupervisedPlugin):
                             one_hot_mask = torch.ones_like(similarity[0:1])
                             one_hot_mask[0, torch.unique(labels)] = 0.0
                             one_hot_mask_d = one_hot_mask \
-                                             / one_hot_mask.sum(-1, keepdims=True)
+                                             / one_hot_mask.sum(-1,
+                                                                keepdims=True)
 
                             d = nn.functional.kl_div(similarity[mask],
                                                      one_hot_mask_d,
@@ -1484,28 +1496,29 @@ class CustomBlockModel(MultiTaskModule):
         self.embeddings = None
 
         self.cv1 = DynamicMoERoutingLayer(3, 32,
-                                   input_routing_size=512,
-                                   input_routing_f=nn.Sequential(
-                                       # nn.Conv2d(3, 3, 3),
-                                       nn.AdaptiveAvgPool2d(
-                                           4)
-                                   ))
+                                          input_routing_size=512,
+                                          input_routing_f=nn.Sequential(
+                                              # nn.Conv2d(3, 3, 3),
+                                              nn.AdaptiveAvgPool2d(
+                                                  4)
+                                          ))
 
         self.cv2 = DynamicMoERoutingLayer(32, 64,
-                                   input_routing_size=512,
-                                   input_routing_f=nn.Sequential(
-                                       # nn.Conv2d(3, 3, 3),
-                                       nn.AdaptiveAvgPool2d(
-                                           4)
-                                   ))
+                                          input_routing_size=512,
+                                          input_routing_f=nn.Sequential(
+                                              # nn.Conv2d(3, 3, 3),1
+                                              nn.AdaptiveAvgPool2d(
+                                                  4)
+                                          ))
 
         self.cv3 = DynamicMoERoutingLayer(64, 128,
-                                   input_routing_size=512,
-                                   input_routing_f=nn.Sequential(
-                                       # nn.Conv2d(3, 3, 3),
-                                       nn.AdaptiveAvgPool2d(
-                                           4)
-                                   ))
+                                          input_routing_size=512,
+                                          input_routing_f=nn.Sequential(
+                                              # nn.Conv2d(3, 3, 3),
+                                              nn.AdaptiveAvgPool2d(
+                                                  4)
+                                          ))
+
         # self.cv2 = MoERoutingLayer(32, 64, n_blocks=10,
         #                            input_routing_size=3 * 16 * 3 + 20,
         #                            input_routing_f=nn.Sequential(
@@ -1534,7 +1547,7 @@ class CustomBlockModel(MultiTaskModule):
         #                            )
 
         self.mx = nn.AdaptiveAvgPool2d(2)
-        self.in_features = 128 * 4
+        self.in_features = 128 * 3 * 3
 
         # self.classifiers = HeadsRoutingLayer(128 * 4,
         #                                      3 * 16 * 3 + 20,
@@ -1591,10 +1604,12 @@ class CustomBlockModel(MultiTaskModule):
             -> torch.Tensor:
 
         routing = self.routing_model(x)
+        self.current_routing = routing
+
         x = self.features(x, task_labels, routing_vector=routing, tau=None)
 
         # logits = self.classifiers[str(task_labels)](x)
-        x = self.mx(x)
+        # x = self.mx(x)
         x = torch.flatten(x, 1)
 
         logits = self.classifiers(x)
@@ -1631,8 +1646,7 @@ class CustomBlockModel(MultiTaskModule):
             self.cv1(x, task_labels, routing_vector=routing_vector, **kwargs))
         x = torch.relu(
             self.cv2(x, task_labels, routing_vector=routing_vector, **kwargs))
-        x = torch.relu(
-            self.cv3(x, task_labels, routing_vector=routing_vector, **kwargs))
+        x = self.cv3(x, task_labels, routing_vector=routing_vector, **kwargs)
         # x = torch.relu(
         #     self.cv2(x, task_labels, routing_vector=routing_vector, **kwargs))
         # x = torch.relu(
@@ -1674,6 +1688,10 @@ class CustomBlockModel(MultiTaskModule):
 
         return torch.nn.functional.normalize(logits, 2, -1)
 
+
+torch.manual_seed(0)
+# random.seed(0)
+np.random.seed(0)
 
 device = '0'
 
@@ -1795,8 +1813,8 @@ if __name__ == '__main__':
     train_tasks = cifar10_train_stream
     test_tasks = cifar10_test_stream
 
-    model = train(train_epochs=5,
-                  fine_tune_epochs=5,
+    model = train(train_epochs=1,
+                  fine_tune_epochs=1,
                   train_stream=train_tasks,
                   test_stream=test_tasks)
 

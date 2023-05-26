@@ -223,8 +223,6 @@ class MoERoutingLayer(AbsDynamicLayer, DynamicModule):
 
     @torch.no_grad()
     def freeze_blocks(self, task, top_k=2):
-        # return
-
         def hook(grad_input):
             return torch.zeros_like(grad_input)
 
@@ -234,7 +232,8 @@ class MoERoutingLayer(AbsDynamicLayer, DynamicModule):
 
         for i in idxs.tolist():
             i = str(i)
-            # self.blocks_embeddings[i].register_hook(hook)
+            if self.freeze_embeddings:
+                self.blocks_embeddings[i].register_hook(hook)
             set_requires_grad(self.blocks[i], False)
 
         self.similarity_statistics = []
@@ -443,7 +442,7 @@ class DynamicMoERoutingLayer(AbsDynamicLayer, DynamicModule):
                  input_channels: int,
                  output_channels: int,
                  input_routing_size: int,
-                 freeze_embeddings=True,
+                 freeze_embeddings=False,
                  **kwargs):
 
         super().__init__()
@@ -486,15 +485,12 @@ class DynamicMoERoutingLayer(AbsDynamicLayer, DynamicModule):
         indexes = []
         for n, m in self.named_buffers():
             if n.startswith('idx'):
-                indexes.extend(m.tolist())
+                indexes.extend(map(str, m.tolist()))
 
         indexes = set(indexes)
 
-        # keys =
         for i in list(self.blocks.keys()):
-            i = int(i)
             if i not in indexes:
-                i = str(i)
                 del self.blocks[i]
                 del self.blocks_embeddings[i]
 
@@ -512,8 +508,6 @@ class DynamicMoERoutingLayer(AbsDynamicLayer, DynamicModule):
                 self.blocks[i].reset_parameters()
 
     def train_adaptation(self, experience):
-        self.num_tasks += 1
-
         tid = experience.current_experience
 
         self.similarity_statistics = []
@@ -523,7 +517,7 @@ class DynamicMoERoutingLayer(AbsDynamicLayer, DynamicModule):
 
         if not self.freeze_embeddings:
             for t in range(tid):
-                idxs = self._get_indexes(t)
+                idxs = self._get_indexes(t).tolist()
                 for i in idxs:
                     i = str(i)
                     if self.embeddings_initializer is not None:
@@ -613,10 +607,10 @@ class DynamicMoERoutingLayer(AbsDynamicLayer, DynamicModule):
 
         similarity = calculate_similarity(x, blocks_embeddings)
 
-        # if self.training:
-        #     s = (similarity + torch.randn_like(similarity) * 0.1) / 1
-        # else:
-        s = similarity
+        if self.training:
+            s = (similarity + torch.randn_like(similarity) * 0.1) / 1
+        else:
+            s = similarity
 
         weights = torch.softmax(s, -1)
         weights = self.sampler(weights)

@@ -38,7 +38,7 @@ def calculate_similarity(x, y,
                          distance: str = None,
                          sigma=2):
     if distance is None:
-        distance = 'euclidean'
+        distance = 'cosine'
 
     di = calculate_distance(x, y, distance, sigma)
 
