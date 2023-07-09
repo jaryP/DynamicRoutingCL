@@ -38,7 +38,41 @@ class CumulativeMultiHeadClassifier(MultiTaskModule):
             # super().adaptation(experience)
             self.classes_so_far += len(curr_classes)
 
-    def forward_single_task(self, x, task_label):
+    def forward(
+            self, x: torch.Tensor, task_labels: torch.Tensor, mask=True,
+    ) -> torch.Tensor:
+        """compute the output given the input `x` and task labels.
+
+        :param x:
+        :param task_labels: task labels for each sample. if None, the
+            computation will return all the possible outputs as a dictionary
+            with task IDs as keys and the output of the corresponding task as
+            output.
+        :return:
+        """
+        if task_labels is None:
+            return self.forward_all_tasks(x)
+
+        if isinstance(task_labels, int):
+            # fast path. mini-batch is single task.
+            return self.forward_single_task(x, task_labels, mask)
+        else:
+            unique_tasks = torch.unique(task_labels)
+
+        out = torch.zeros(x.shape[0], self.max_class_label, device=x.device)
+        for task in unique_tasks:
+            task_mask = task_labels == task
+            x_task = x[task_mask]
+            out_task = self.forward_single_task(x_task, task.item(), mask)
+            assert len(out_task.shape) == 2, (
+                "multi-head assumes mini-batches of 2 dimensions "
+                "<batch, classes>"
+            )
+            n_labels_head = out_task.shape[1]
+            out[task_mask, :n_labels_head] = out_task
+        return out
+
+    def forward_single_task(self, x, task_label, mask=True):
         """compute the output given the input `x`. This module uses the task
         label to activate the correct head.
 
@@ -47,18 +81,27 @@ class CumulativeMultiHeadClassifier(MultiTaskModule):
         :return:
         """
 
+        # return self.classifiers[str(task_label)](x)
+
+        # out = torch.cat([c(x)
+        #                for c in self.classifiers.values()], -1)
+        #
+        # return out
+
         # if task_label == 0:
         #     task_label = str(task_label)
-        #     o = self.classifiers[task_label](x)
+        # o = self.classifiers[str(task_label)](x)
+        # return o
+
         # else:
         out = torch.cat([self.classifiers[str(t)](x)
-                       for t in range(task_label + 1)], -1)
+                         for t in range(task_label + 1)], -1)
 
         diff = abs(self.classes_so_far - out.shape[-1])
 
         if diff != 0:
             # out = torch.zeros(len(o), self.classes_so_far, device=o.device)
-            out = nn.functional.pad(out, (0, diff))
+            out = nn.functional.pad(out, (0, diff), value=0)
             # out[:, :o.shape[-1]] = o
             # out[:, o.shape[-1]:] = -torch.inf
 

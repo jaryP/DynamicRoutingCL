@@ -147,7 +147,7 @@ class CentroidsMatching(SupervisedPlugin):
         super().__init__()
 
         self.distributions = {}
-        self.patterns_per_experience = 500
+        self.patterns_per_experience = 50
         self.top_k = top_k
         self.per_sample_routing_reg = per_sample_routing_reg
 
@@ -173,15 +173,16 @@ class CentroidsMatching(SupervisedPlugin):
 
         self.centroids = []
 
-    def before_train_dataset_adaptation(self, strategy, *args, **kwargs):
-        # if self.per_sample_routing_reg:
-        if strategy.experience.current_experience == 0:
-            return
-
-        self.past_model = deepcopy(strategy.model)
+    # def before_train_dataset_adaptation(self, strategy, *args, **kwargs):
+    #     # if self.per_sample_routing_reg:
+    #     if strategy.experience.current_experience == 0:
+    #         return
+    #
+    #     self.past_model = deepcopy(strategy.model)
 
     def before_training_exp(self, strategy: SupervisedTemplate,
                             **kwargs):
+        self.past_model = deepcopy(strategy.model)
 
         classes = strategy.experience.classes_in_this_experience
         self.tasks_nclasses[strategy.experience.task_label] = classes
@@ -189,7 +190,7 @@ class CentroidsMatching(SupervisedPlugin):
         tid = strategy.experience.current_experience
 
         if tid > 0:
-            self.past_model = deepcopy(strategy.model)
+            self.past_model = clone_module(strategy.model)
 
         paths = strategy.model.available_paths
         selected_path = np.random.randint(0, paths)
@@ -320,15 +321,25 @@ class CentroidsMatching(SupervisedPlugin):
 
                 i = max(self.tasks_nclasses[t1.item()]) + 1
 
-                preds = strategy.model(x_t, t1.item())
-                if preds.shape[-1] != i:
-                    # preds = preds[:, :i]
-                    preds = preds[:, self.tasks_nclasses[t1.item()]]
+                preds = strategy.model(x_t, t1.item(), mask=True)
+                # if preds.shape[-1] != i:
+                #     indexes = [for idx ]
+                #     preds = preds[:, :i]
+                # preds = preds[:, self.tasks_nclasses[t1.item()]]
+                # preds = preds[:, :i]
                 # preds = preds.index_select(-1, other_indexes)
+
                 preds = torch.softmax(preds, -1)
-                
-                h = -(preds.log() * preds).sum(-1)
-                h = h / np.log(preds.shape[-1])
+                # mask = preds == 0.0
+                # d = mask.sum(-1)
+
+                h = -(preds.log() * preds)
+                h = h.sum(-1) / np.log(preds.shape[-1])
+
+                # h = h[mask].sum(-1)
+                # h = torch.where(mask, 0, h).sum(-1)
+
+                # h = h / torch.log(d)
                 # h = h[~torch.isnan(h)]
                 # h = torch.nan_to_num(h, 1)
                 task_loss += (1 - h).mean()
@@ -338,19 +349,32 @@ class CentroidsMatching(SupervisedPlugin):
         all_loss = all_loss / (tid + 1)
         strategy.loss += all_loss * 1
 
-        x = x[tids != tid]
-        tids = tids[tids != tid]
+        ot_x, ot_y, ot_t = next(
+            iter(DataLoader(self.av, batch_size=strategy.train_mb_size,
+                            shuffle=True)))
 
-        self.past_model(x, tids)
-        past_features = self.past_model.current_features
+        ot_x = ot_x.to(x.device)
+        # mask = tids != tid
+        # x = x[mask]
+        # tids = tids[mask]
 
-        # loss = nn.functional.mse_loss(current_features, past_features)
-        loss = nn.functional.cosine_similarity(current_features, past_features)
-        loss = (loss + 1) / 2
-        loss = 1 - loss
-        loss = loss.mean()
+        with torch.no_grad():
+            past_logits = self.past_model(ot_x, ot_t)
 
-        strategy.loss += loss * 1
+        strategy.model(ot_x, ot_t)
+        # current_logits = strategy.model(ot_x, ot_t)
+        #
+        # loss = nn.functional.mse_loss(current_logits,
+        #                               past_logits)
+
+        loss = nn.functional.cosine_similarity(strategy.model.current_features,
+                                               self.past_model.current_features,
+                                               -1).mean()
+        # loss = (loss + 1) / 2
+        # loss = 1 - loss
+        # loss = loss.mean()
+
+        strategy.loss += loss * 0
 
     def before_backward_distance(self, strategy, *args, **kwargs):
         tid = strategy.experience.current_experience
@@ -414,8 +438,9 @@ class CentroidsMatching(SupervisedPlugin):
                 # current_centroids = nn.functional.normalize(current_centroids, 2, -1)
 
                 # v = torch.norm(features - current_centroids, 2, -1)
+                v = nn.functional.mse_loss(strategy.mb_output, features)
 
-                v = torch.cosine_similarity(features, current_centroids, -1)
+                # v = torch.cosine_similarity(strategy.mb_output, features, -1)
 
                 v = (v + 1) / 2
                 # if it == ot:
@@ -1902,7 +1927,7 @@ class CustomBlockModel(MultiTaskModule):
                                                masking=False)
 
         self.classifiers = CumulativeMultiHeadClassifier(self.in_features,
-                                                         initial_out_features=2, )
+                                                         initial_out_features=2)
 
         layers_blocks = [len(l.blocks) for l in self.layers]
         paths = []
@@ -1989,12 +2014,14 @@ class CustomBlockModel(MultiTaskModule):
     #         self.tasks_classes = len(
     #             set(dataset.classes_in_this_experience))
 
-    def forward(self, x: torch.Tensor, task_labels: torch.Tensor, **kwargs) \
+    def forward(self, x: torch.Tensor, task_labels: torch.Tensor,
+                mask=True,
+                **kwargs) \
             -> torch.Tensor:
 
         if isinstance(task_labels, int):
             # fast path. mini-batch is single task.
-            return self.forward_single_task(x, task_labels, **kwargs)
+            return self.forward_single_task(x, task_labels, mask, **kwargs)
         else:
             unique_tasks = torch.unique(task_labels)
 
@@ -2006,6 +2033,7 @@ class CustomBlockModel(MultiTaskModule):
             x_task = x[task_mask]
             out_task = self.forward_single_task(x_task,
                                                 task.item(),
+                                                mask,
                                                 **kwargs)
 
             if out is None:
@@ -2028,7 +2056,7 @@ class CustomBlockModel(MultiTaskModule):
         for l in self.layers[:-1]:
             x = torch.relu(l(x, task_labels, path_id))
 
-        x = torch.relu(self.layers[-1](x, task_labels, path_id))
+        x = self.layers[-1](x, task_labels, path_id)
 
         x = self.mx(x).flatten(1)
 
@@ -2040,10 +2068,11 @@ class CustomBlockModel(MultiTaskModule):
         x = self.features(x, task_labels, path_id)
         return self.p(x)
 
-    def forward_single_task(self, x, task_labels, **kwargs):
+    def forward_single_task(self, x, task_labels, mask, **kwargs):
 
         features = self.features(x, task_labels)
 
+        # logits = self.classifiers(features, task_labels=task_labels, mask=mask)
         logits = self.classifiers(features, task_labels=task_labels)
         return logits
 
@@ -2205,25 +2234,48 @@ def train(train_stream, test_stream, theta=1, train_epochs=1,
         with torch.no_grad():
 
             m = np.zeros((current_task_id + 1, current_task_id + 1))
+
             for i in range(len(test_stream[:current_task_id + 1])):
-                x, y, t = next(iter(DataLoader(test_stream[i].dataset,
-                                               batch_size=512,
-                                               shuffle=True)))
+                t, c = 0, 0
 
-                for j in range(len(test_stream[:current_task_id + 1])):
-                    pred = complete_model(x.to(device), j)
-                    # pred = pred[:, test_stream[i].classes_in_this_experience]
+                for x, y, _ in DataLoader(test_stream[i].dataset,
+                                          batch_size=1000,
+                                          shuffle=True):
 
-                    print(i, j, pred.mean(0))
+                    vals = []
+                    x = x.to(device)
 
-                    preds = torch.softmax(pred, -1)
-                    h = -(preds.log() * preds).sum(-1)
-                    h = h / np.log(preds.shape[-1])
+                    # x, y, t = next(iter(DataLoader(test_stream[i].dataset,
+                    #                                batch_size=1000,
+                    #                                shuffle=True)))
 
-                    m[i, j] = h.mean().item()
-                    print(h.mean())
+                    for j in range(len(test_stream[:current_task_id + 1])):
+                        pred = complete_model(x, j, mask=True)
+                        pred = pred[:, test_stream[i].classes_in_this_experience]
 
-            if current_task_id > 0:
+                        # print(i, j, pred.mean(0))
+
+                        preds = torch.softmax(pred, -1)
+                        h = -(preds.log() * preds).sum(-1)
+                        h = h / np.log(preds.shape[-1])
+
+                        vals.append(h)
+
+                        m[i, j] += h.mean().item()
+
+                    # print(h.mean())
+
+                    vals = torch.stack(vals, -1)
+                    task_pred = vals.argmin(-1)
+                    correct = (task_pred == i).sum()
+
+                    c += correct.item()
+                    t += len(x)
+
+                print(i, t, c, c / t)
+                print(i, torch.bincount(task_pred))
+
+            if current_task_id > 0 or True:
 
                 fig, ax = plt.subplots()
                 im = ax.matshow(m)
@@ -2231,9 +2283,9 @@ def train(train_stream, test_stream, theta=1, train_epochs=1,
 
                 for i in range(len(m)):
                     for j in range(len(m)):
-                        c = m[i, j]
+                        c = m[j, i]
                         ax.text(i, j, f'{c:.2f}', va='center', ha='center',
-                                color=("black", "white")[int(c < 0.5)])
+                                color=("black", "white")[int(c < 0.65)])
 
                 plt.colorbar(im)
                 plt.ylabel('Source task')
@@ -2439,7 +2491,7 @@ if __name__ == '__main__':
     train_tasks = cifar10_train_stream
     test_tasks = cifar10_test_stream
 
-    model = train(train_epochs=5,
+    model = train(train_epochs=1,
                   fine_tune_epochs=0,
                   train_stream=train_tasks,
                   test_stream=test_tasks)
