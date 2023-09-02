@@ -1025,3 +1025,87 @@ class RoutingLayer(AbsDynamicLayer, DynamicModule):
         f = self.blocks[block_id](x)
 
         return f
+
+
+class BlockRoutingLayer(DynamicModule):
+    def __init__(self,
+                 input_channels: int,
+                 output_channels: int,
+                 project_dim = None,
+                 # out_project_dim = None,
+                 **kwargs):
+
+        super().__init__()
+
+        self.input_channels = input_channels
+        self.output_channels = output_channels
+
+        self.blocks = nn.ModuleDict()
+        self.projectors = nn.ModuleDict()
+
+        for i in range(10):
+            b = nn.Conv2d(in_channels=self.input_channels,
+                          out_channels=self.output_channels,
+                          kernel_size=3,
+                          stride=1)
+
+            i = str(i)
+            self.blocks[i] = b
+
+            if project_dim is not None and project_dim > 0:
+                l = nn.Sequential(nn.AdaptiveAvgPool2d(4),
+                                  nn.Flatten(1),
+                                  nn.ReLU(),
+                                  nn.Linear(output_channels * 16, project_dim))
+
+            # else:
+            #     l = nn.Sequential(nn.AdaptiveAvgPool2d(2),
+            #                       nn.Flatten(1))
+
+                self.projectors[i] = l
+
+    def clean_cache(self):
+        keys = [k for k, _ in self.named_buffers() if 'cache' in k]
+        for k in keys:
+            delattr(self, k)
+
+    def forward(self, x, block_id, last_index_cache=None, **kwargs):
+        if isinstance(block_id, (list, tuple)):
+            ret = []
+            ret_l = []
+            cache = dict()
+
+            for _x, _bid in zip(x, block_id):
+                # l = None
+                # if _bid in cache:
+                #     f, l = cache[_bid]
+                # else:
+                #     f = self.blocks[str(_bid)](_x).relu()
+                #     if len(self.projectors) > 0:
+                #         l = self.projectors[str(_bid)](f)
+                # if l is not None:
+                #     ret_l.append(l)
+                # ret.append(f)
+                #
+                # cache[_bid] = (f, l)
+
+                f = self.blocks[str(_bid)](_x).relu()
+                if len(self.projectors) > 0:
+                    l = self.projectors[str(_bid)](f)
+                    ret_l.append(l)
+
+                ret.append(f)
+
+            if len(ret_l) > 0:
+                return ret, ret_l
+            return ret, None
+        else:
+            f = self.blocks[str(block_id)](x)
+            l = None
+            if len(self.projectors) > 0:
+                l = self.projectors[str(block_id)](f)
+
+            if l is not None:
+                return f, l
+            return f
+

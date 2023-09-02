@@ -2,6 +2,8 @@ from builtins import enumerate
 from copy import deepcopy
 from itertools import chain
 from typing import Optional, Sequence, Iterable, Union
+
+from avalanche.training import ExperienceBalancedBuffer
 from sklearn.manifold import TSNE
 from matplotlib import pyplot as plt
 import distinctipy
@@ -147,7 +149,7 @@ class CentroidsMatching(SupervisedPlugin):
         super().__init__()
 
         self.distributions = {}
-        self.patterns_per_experience = 50
+        self.patterns_per_experience = 100
         self.top_k = top_k
         self.per_sample_routing_reg = per_sample_routing_reg
 
@@ -172,6 +174,9 @@ class CentroidsMatching(SupervisedPlugin):
         self.layers_centroids = defaultdict(dict)
 
         self.centroids = []
+
+        self.storage_policy = ExperienceBalancedBuffer(
+            max_size=200, adaptive_size=True)
 
     # def before_train_dataset_adaptation(self, strategy, *args, **kwargs):
     #     # if self.per_sample_routing_reg:
@@ -202,12 +207,12 @@ class CentroidsMatching(SupervisedPlugin):
         strategy.model.calculate_available_paths()
 
         if tid > 0:
-            av = concat_datasets(list(self.past_dataset.values()))
-            self.av = av
-
+            # av = concat_datasets(list(self.past_dataset.values()))
+            self.av = self.storage_policy.buffer
+            
             strategy.dataloader = ReplayDataLoader(
                 strategy.adapted_dataset,
-                av,
+                self.storage_policy.buffer,
                 oversample_small_tasks=True,
                 batch_size=strategy.train_mb_size,
                 batch_size_mem=strategy.train_mb_size,
@@ -218,57 +223,15 @@ class CentroidsMatching(SupervisedPlugin):
             )
 
     def before_training_epoch(self, strategy, *args, **kwargs):
-
         for name, module in strategy.model.named_modules():
             if isinstance(module, (AbsDynamicLayer)):
                 module.similarity_statistics = []
 
-    def after_finetuning_exp(self, strategy: 'BaseStrategy', **kwargs):
-        return
-        tid = strategy.experience.current_experience
-
-        for module in strategy.model.modules():
-            if isinstance(module, (AbsDynamicLayer)):
-                module.freeze_blocks(tid)
-
-        dataset = strategy.experience.dataset
-        dataset_idx = np.arange(len(dataset))
-        np.random.shuffle(dataset_idx)
-
-        idx_to_get = dataset_idx[:self.patterns_per_experience]
-        memory = dataset.train().subset(idx_to_get)
-        self.past_dataset[tid] = memory
-
-        self.past_model = clone_module(strategy.model)
-
     @torch.no_grad()
     def after_training_exp(self, strategy, **kwargs):
+        self.storage_policy.update(strategy, **kwargs)
+        # return
         tid = strategy.experience.current_experience
-
-        dev_x, _, _ = next(
-            iter(DataLoader(strategy.experience.dev_dataset.eval(),
-                            len(strategy.experience.dev_dataset))))
-        dev_x = dev_x.to(strategy.device)
-
-        current_centroids = strategy.model.pp(dev_x, tid).mean(0, keepdims=True)
-
-        self.centroids.append(current_centroids)
-
-        # for module in strategy.model.modules():
-        #     if isinstance(module, RoutingLayer):
-        #         module.freeze_blocks(tid)
-
-        for i, d in self.past_dataset.items():
-            dev_x, _, _ = next(
-                iter(DataLoader(d.eval(), len(d))))
-            dev_x = dev_x.to(strategy.device)
-
-            current_centroids = strategy.model.pp(dev_x, i).mean(0,
-                                                                 keepdims=True)
-
-            self.centroids[i] = current_centroids
-
-        self.past_dataset[tid] = strategy.experience.dev_dataset
 
         dataset = strategy.experience.dataset
         dataset_idx = np.arange(len(dataset))
@@ -289,7 +252,7 @@ class CentroidsMatching(SupervisedPlugin):
 
         # if tid > 0:
 
-    def before_backward(self, strategy, *args, **kwargs):
+    def _before_backward(self, strategy, *args, **kwargs):
         # return
         # # self.before_backward_kl(strategy, args, kwargs)
         # self.before_backward_distance(strategy, args, kwargs)
@@ -304,56 +267,41 @@ class CentroidsMatching(SupervisedPlugin):
         all_tasks = torch.unique(tids)
         current_features = strategy.model.current_features[tids != tid]
 
-        all_loss = 0
-        for t in all_tasks:
-            task_loss = 0
-
-            t_mask = tids == t
-            x_t = x[t_mask]
-
-            # other_indexes = [l for i in range(tid + 1)
-            #                  for l in self.tasks_nclasses[i] if i != t.item()]
-            # other_indexes = torch.tensor(other_indexes, device=x.device)
-
-            for t1 in all_tasks:
-                if t1 == t:
-                    continue
-
-                i = max(self.tasks_nclasses[t1.item()]) + 1
-
-                preds = strategy.model(x_t, t1.item(), mask=True)
-                # if preds.shape[-1] != i:
-                #     indexes = [for idx ]
-                #     preds = preds[:, :i]
-                # preds = preds[:, self.tasks_nclasses[t1.item()]]
-                # preds = preds[:, :i]
-                # preds = preds.index_select(-1, other_indexes)
-
-                preds = torch.softmax(preds, -1)
-                # mask = preds == 0.0
-                # d = mask.sum(-1)
-
-                h = -(preds.log() * preds)
-                h = h.sum(-1) / np.log(preds.shape[-1])
-
-                # h = h[mask].sum(-1)
-                # h = torch.where(mask, 0, h).sum(-1)
-
-                # h = h / torch.log(d)
-                # h = h[~torch.isnan(h)]
-                # h = torch.nan_to_num(h, 1)
-                task_loss += (1 - h).mean()
-
-            all_loss += task_loss
-
-        all_loss = all_loss / (tid + 1)
-        strategy.loss += all_loss * 1
+        matrix = torch.zeros(len(all_tasks), len(all_tasks), device=x.device)
+        loss = 0
 
         ot_x, ot_y, ot_t = next(
             iter(DataLoader(self.av, batch_size=strategy.train_mb_size,
                             shuffle=True)))
 
         ot_x = ot_x.to(x.device)
+
+        all_loss = 0
+        for t in torch.unique(ot_t):
+            if t == tid:
+                continue
+
+            task_loss = 0
+
+            t_mask = ot_t == t
+            x_t = ot_x[t_mask]
+
+            preds = strategy.model(x_t, tid, mask=False)
+            preds = torch.softmax(preds, -1)
+
+            h = -(preds.log() * preds)
+            h = h.sum(-1) / np.log(preds.shape[-1])
+
+            loss += (1 - h).sum()
+
+        loss = loss.mean() / (len(x) // 2)
+        # distance = matrix - torch.eye(len(matrix), device=x.device)
+        # norm = torch.linalg.matrix_norm(distance)
+        strategy.loss += loss * 1
+
+        # all_loss = all_loss / (tid + 1)
+        # strategy.loss += all_loss * 1
+
         # mask = tids != tid
         # x = x[mask]
         # tids = tids[mask]
@@ -371,1121 +319,142 @@ class CentroidsMatching(SupervisedPlugin):
                                                self.past_model.current_features,
                                                -1).mean()
         # loss = (loss + 1) / 2
-        # loss = 1 - loss
+        loss = 1 - loss
         # loss = loss.mean()
 
-        strategy.loss += loss * 0
+        strategy.loss += loss * 1
 
-    def before_backward_distance(self, strategy, *args, **kwargs):
+    def before_backward(self, strategy, *args, **kwargs):
+        # return
+        # # self.before_backward_kl(strategy, args, kwargs)
+        # self.before_backward_distance(strategy, args, kwargs)
+
         tid = strategy.experience.current_experience
+
         if tid == 0:
             return
 
         tids = strategy.mb_task_id
-
-        # current_features = strategy.model.current_features
-        # dev_x, _, _ = next(iter(DataLoader(strategy.experience.dev_dataset,
-        #                                    len(strategy.experience.dev_dataset))))
-        # dev_x = dev_x.to(strategy.device)
-        #
-        # current_centroids = strategy.model.features(dev_x, tid)
-        # current_centroids = current_centroids.flatten(1).mean(0, keepdims=True)
-        #
-        # dist = torch.norm(current_features - current_centroids, 2, -1)
-        # dist = torch.maximum(torch.zeros_like(dist), dist - 0.5)
-        #
-        # positive_distance = dist.mean()
-        # # loss += dist.mean()
-        #
-        # strategy.loss += positive_distance
-        # current_features = strategy.model.current_features
-        # dev_x, _, _ = next(iter(DataLoader(strategy.experience.dev_dataset,
-        #                                    len(strategy.experience.dev_dataset))))
-        # dev_x = dev_x.to(strategy.device)
-        #
-        # current_centroids = strategy.model.features(dev_x, tid)
-        # current_centroids = current_centroids.mean(0, keepdims=True)
-        #
-        # dist = torch.norm(current_features - current_centroids, 2, -1)
-        # dist = torch.maximum(torch.zeros_like(dist), dist - 0.5)
-        #
-        # positive_distance = dist.mean()
-
-        m = torch.zeros((tid + 1, tid + 1), device=x.device)
-
-        for it in range(tid + 1):
-            mask = tids == it
-            tx = x[mask]
-
-            for ot in range(it, tid + 1):
-                # current_centroids = ot
-                features = strategy.model.pp(tx, ot)
-
-                if ot == tid:
-                    with torch.no_grad():
-                        dev_x, _, _ = next(
-                            iter(DataLoader(strategy.experience.dev_dataset,
-                                            len(strategy.experience.dev_dataset))))
-                        dev_x = dev_x.to(strategy.device)
-
-                        current_centroids = strategy.model.pp(dev_x, ot)
-                        current_centroids = current_centroids.mean(0,
-                                                                   keepdims=True)
-                else:
-                    current_centroids = self.centroids[ot]
-
-                features = nn.functional.normalize(features, 2, -1)
-                # current_centroids = nn.functional.normalize(current_centroids, 2, -1)
-
-                # v = torch.norm(features - current_centroids, 2, -1)
-                v = nn.functional.mse_loss(strategy.mb_output, features)
-
-                # v = torch.cosine_similarity(strategy.mb_output, features, -1)
-
-                v = (v + 1) / 2
-                # if it == ot:
-                #     v = 1 / v
-                # v = torch.maximum(torch.zeros_like(v), v - 0.5)
-                # else:
-                # v = 1 / v
-                # v = torch.maximum(torch.zeros_like(v), 0.5 - v)
-
-                v = v.mean()
-                m[it, ot] = v
-                m[ot, it] = v
-
-        # ds = torch.diag(m)
-        # ds = torch.maximum(torch.zeros_like(ds), ds - 0.5)
-        # nz = torch.count_nonzero(ds)
-        # if nz > 0:
-        #     ds = ds.sum() / nz
-        #     strategy.loss += ds
-        #
-        # ss = 0
-        # if tid > 0:
-        #     i, j = torch.triu_indices(len(m), len(m), 1)
-        #     dists = m[i, j]
-        #     if torch.count_nonzero(dists) > 0:
-        #         sims = 1 / dists
-        #         # sims = torch.maximum(torch.zeros_like(sims), sims - 0.5)
-        #         ss = sims.mean() * 0.1
-        #
-        # strategy.loss += ss
-
-        # m = torch.eye(len(m), device=m.device) - m
-        norm = torch.linalg.matrix_norm(torch.eye(len(m), device=m.device) - m)
-        strategy.loss += norm
-
-        # print(m)
-        return
-
-        for t in torch.unique(tids):
-            mask = tids == t
-            t = t.item()
-
-            features = strategy.model.current_features[mask]
-
-            if t == tid:
-                dev_x, _, _ = next(
-                    iter(DataLoader(strategy.experience.dev_dataset,
-                                    len(strategy.experience.dev_dataset))))
-                dev_x = dev_x.to(strategy.device)
-
-                current_centroids = strategy.model.features(dev_x, tid)
-                current_centroids = current_centroids.mean(0, keepdims=True)
-            else:
-                current_centroids = self.centroids
-
-        # loss += dist.mean()
-
-        negative_r_distance = 0
-
-        # for i in range(tid):
-        #     current_centroids = self.centroids[i]
-        #     f = strategy.model.features(x, i)
-        #     dist = torch.norm(f - current_centroids, 2, -1)
-        #     sim = 1 / dist
-        #     # sim = torch.maximum(torch.zeros_like(sim), sim - 0.5)
-        #
-        #     negative_r_distance += sim.mean()
-
-        # negative_r_distance = 0
-
-        # r_x = torch.randn(500, 3, 32, 32, device=strategy.device)
-        # d = 0
-        #
-        # paths = strategy.model.get_random_paths(5)
-        # for p in paths:
-        #     d += 1
-        #
-        #     f = strategy.model.features(r_x, None, p).mean(0, keepdims=True)
-        #     f1 = strategy.model.features(x, None, p).flatten(1)
-        #
-        #     dist = torch.norm(f1 - f, 2, -1)
-        #     sim = 1 / dist
-        #     sim = torch.maximum(torch.zeros_like(sim), sim - 0.5)
-        #
-        #     negative_r_distance += sim.mean()
-        #
-        # strategy.loss += (negative_r_distance / d) * 0.1
-        #
-        strategy.loss += positive_distance * 0.1
-        # strategy.loss += negative_r_distance * 0.01
-
-        if tid == 0:
-            return
-
-        distances = 0
-        sims = 0
-
-        for i in range(tid):
-            _x, _, _ = next(iter(DataLoader(self.past_dataset[i],
-                                            len(x), shuffle=True)))
-            _x = _x.to(x.device)
-
-            for j in range(tid + 1):
-                if j == tid:
-                    cc = current_centroids
-                else:
-                    cc = self.centroids[j]
-
-                f = strategy.model.features(x, j)
-
-                dist = torch.norm(f - cc, 2, -1)
-
-                if j == i:
-                    dist = torch.maximum(torch.zeros_like(dist), dist - 0.5)
-                    distances += dist.mean()
-                else:
-                    sim = 1 / dist
-                    sim = torch.maximum(torch.zeros_like(sim), sim - 0.5)
-                    sims += sim.mean()
-
-        strategy.loss += sims * 0.01 + distances * 0.01
-        return
-
-        features = []
-
-        negative_r_distance = 0
-        for i in range(tid):
-            f = strategy.model.features(x, i)
-            dist = torch.norm(f - self.centroids[i], 2, -1)
-            sim = 1 / dist
-            # sim = torch.maximum(torch.zeros_like(sim), sim - 0.5)
-
-            negative_r_distance += sim.mean()
-
-            # features.append(torch.norm(f - self.centroids[i], 2, -1))
-
-        negative_r_distance = negative_r_distance / d
-        strategy.loss += negative_r_distance * 1
-
-        return
-        dev_x, _, _ = next(iter(DataLoader(strategy.experience.dev_dataset,
-                                           len(strategy.experience.dev_dataset))))
-        dev_x = dev_x.to(strategy.device)
-
-        current_centroids = strategy.model.features(dev_x, tid)
-        current_centroids = current_centroids.mean(0, keepdims=True)
-
-        features.append(torch.norm(strategy.model.current_features -
-                                   current_centroids, 2, -1))
-
-        features = -torch.stack(features, -1)
-        distr = torch.log_softmax(features, -1)
-        loss = -distr[:, tid].squeeze().mean(0)
-
-        strategy.loss += loss * 5
-        return
-
-        positive_w = 1
-        negative_r_w = 0
-        negative_t_w = 1
-
         x = strategy.mb_x
-        t = strategy.mb_task_id
+        all_tasks = torch.unique(tids)
+        current_features = strategy.model.current_features[tids != tid]
 
-        past_centroids = torch.cat(self.centroids)
-        past_xs = []
-        past_ts = []
+        matrix = torch.zeros(len(all_tasks), len(all_tasks), device=x.device)
 
-        for i in range(tid):
-            _x, _, _ = next(iter(DataLoader(self.past_dataset[i],
-                                            len(x), shuffle=True)))
-            _x = _x.to(x.device)
-            past_xs.append(_x)
+        # all_outs = torch.cat([strategy.model(x, i) for i in range(tid)], -1)
 
-            past_ts.extend([i] * len(_x))
-
-        past_xs = torch.cat(past_xs, 0)
-        past_ts = torch.tensor(past_ts, device=x.device)
-
-        # current_features = strategy.model.current_features
-        dev_x, _, _ = next(iter(DataLoader(strategy.experience.dev_dataset,
-                                           len(strategy.experience.dev_dataset))))
-        dev_x = dev_x.to(strategy.device)
-
-        current_centroids = strategy.model.features(dev_x, tid)
-        current_centroids = current_centroids.flatten(1).mean(0, keepdims=True)
-
-        all_centroids = self.centroids + [current_centroids]
-        xs = torch.cat((x, past_xs), 0)
-        ts = torch.cat((t, past_ts), 0)
-
-        features = []
-        for i in range(tid + 1):
-            f = strategy.model.features(xs, i)
-            features.append(torch.norm(f - all_centroids[i], 2, -1))
-
-        features = -torch.stack(features, -1)
-
-        distr = torch.log_softmax(features, -1)
-        loss = -distr.gather(1, ts[:, None]).squeeze().mean(0)
-
-        strategy.loss += loss * 5
-
-        past_reg = 0
-        for i in range(tid):
-            x, _, _ = next(iter(DataLoader(self.past_dataset[i],
-                                           len(x), shuffle=True)))
-            x = x.to(strategy.device)
-
-            past_centroids = self.past_model.features(x, i).flatten(1)
-            current_centroids = strategy.model.features(x, i).flatten(1)
-
-            sim = nn.functional.cosine_similarity(past_centroids,
-                                                  current_centroids)
-            dist = 1 - sim
-
-            # dist = nn.functional.mse_loss(current_centroids, past_centroids)
-
-            past_reg += dist.mean()
-
-        strategy.loss += past_reg * 5
-
-        return
-        # current_features = current_features.flatten(1)
-
-        # curre = 0
-        dist = torch.norm(current_features - current_centroids, 2, -1)
-        dist = torch.maximum(torch.zeros_like(dist), dist - 0.5)
-
-        positive_distance = dist.mean()
-        # loss += dist.mean()
-
-        d = 1
-        negative_r_distance = 0
-        negative_t_distance = 0
-
-        if negative_r_w > 0:
-            paths = strategy.model.get_random_paths(5)
-            for p in paths:
-                d += 1
-
-                f = strategy.model.features(dev_x, None, p)
-                f = f.mean(0, keepdims=True).flatten(1)
-
-                f1 = strategy.model.features(x, None, p).flatten(1)
-
-                dist = torch.norm(f1 - f, 2, -1)
-                sim = 1 / dist
-                # sim = torch.maximum(torch.zeros_like(sim), sim - 0.5)
-
-                negative_r_distance += sim.mean()
-
-        # for f in strategy.model.random_path_forward(dev_x, 5):
-        #     d += 1
-        #     # for _ in range(5):
-        #     #     f = strategy.model.random_path_forward(dev_x)
-        #     f = f.mean(0, keepdims=True).flatten(1)
-        #
-        #     dist = torch.norm(current_features - f, 2, -1)
-        #     sim = 1 / dist
-        #     sim = torch.maximum(torch.zeros_like(sim), sim - 0.5)
-        #
-        #     negative_r_distance += sim.mean()
-
-        for i in range(tid):
-            d += 1
-            f = strategy.model.features(x, i).flatten(1)
-            # f = f.mean(0, keepdims=True).flatten(1        )
-
-            x, _, _ = next(iter(DataLoader(self.past_dataset[i],
-                                           len(x), shuffle=True)))
-            x = x.to(strategy.device)
-
-            f1 = strategy.model.features(x, i).flatten(1).mean(0, keepdims=True)
-
-            # f1 = strategy.model.features(x, i, None).flatten(1)
-            # f1 = self.centroids[i]
-
-            # dist = torch.norm(current_features - f, 2, -1)
-            dist = torch.norm(f1 - f, 2, -1)
-
-            sim = 1 / dist
-            sim = torch.maximum(torch.zeros_like(sim), sim - 0.5)
-            negative_t_distance += sim.mean()
-
-        loss = (positive_distance * positive_w +
-                negative_r_distance * negative_r_w +
-                negative_t_distance * negative_t_w) / d
-
-        strategy.loss += loss * 0.1
-
-        past_reg = 0
-        for i in range(tid):
-            x, _, _ = next(iter(DataLoader(self.past_dataset[i],
-                                           len(x), shuffle=True)))
-            x = x.to(strategy.device)
-
-            past_centroids = self.past_model.features(x, i).flatten(1)
-            current_centroids = strategy.model.features(x, i).flatten(1)
-
-            # sim = nn.functional.cosine_similarity(past_centroids, current_centroids)
-            # dist = 1 - sim
-
-            dist = nn.functional.mse_loss(current_centroids, past_centroids)
-
-            past_reg += dist.mean()
-
-        strategy.loss += past_reg * 1
-
-        return
         entropies = []
-        classification_losses = []
-        distance_losses = []
-        mask = strategy.mb_task_id == tid
+        for _x, _t in zip(x, tids):
+            _t = _t.item()
+            logits = [strategy.model(_x[None], t)
+                      for t in range(tid + 1) if t != _t]
 
-        # if tid == 0 and strategy.is_finetuning:
-        #     return
+            logits = torch.cat(logits, -1)
+            logits = torch.softmax(logits, -1)
 
-        if tid > 0:
-            self.past_model.eval()
+            h = -(logits.log() * logits)
+            h = -h.sum(-1)
+            entropies.append(h)
 
-            _x = strategy.mb_x[~mask]
-            # past_routing = self.past_model.routing_model(_x)
+        entropies = torch.cat(entropies, 0)
+        loss = entropies.mean()
 
-            # current_routing = strategy.mb_output
-            #
-            # norm = torch.norm(past_routing - current_routing, 2, -1).mean()
-            #     # strategy.loss += norm
-            #     # print(norm)
-            #
-            #     _x = strategy.mb_x[~mask]
-            #     t = strategy.mb_task_id[~mask]
-            #     # _x = strategy.mb_x
+        strategy.loss += loss * 10
 
-            with torch.no_grad():
-                self.past_model(_x, strategy.mb_task_id[~mask])
-                past_routing = {}
-
-                for name, module in self.past_model.named_modules():
-                    if isinstance(module, (
-                            AbsDynamicLayer)):
-                        past_routing[name] = torch.argmax(
-                            module.last_distribution[0], -1)
-                        # past_routing[name] = torch.softmax(
-                        #     module.last_distribution[1],
-                        #     -1)
-
-            d = 0
-            for name, module in strategy.model.named_modules():
-                if isinstance(module, (
-                        AbsDynamicLayer)):
-                    # distr = torch.log_softmax(
-                    #     module.last_distribution[1][~mask], -1)
-                    # similarity = cosine_similarity(
-                    #     module.current_routing[~mask],
-                    #     past_routing[name])
-                    # loss = nn.functional.kl_div(distr, past_routing[name])
-                    loss = nn.functional.cross_entropy(
-                        module.last_distribution[1][~mask],
-                        past_routing[name])
-                    # distance = 1 - similarity
-                    # distance = distance.mean(0)
-
-                    # distance = nn.functional.mse_loss(
-                    #     module.current_routing[~mask],
-                    #     past_routing[name])
-                    d += loss
-
-            distance = d / 3
-
-            strategy.loss += distance * 0
-
-        for name, module in strategy.model.named_modules():
-            if isinstance(module, (AbsDynamicLayer)):
-                weights, similarity = module.last_distribution
-
-                # if strategy.is_finetuning:
-                #     toiter =
-                # else:
-                #     toiter = range(tid)
-                # if not strategy.is_finetuning:
-                #     distr = torch.softmax(similarity[mask].mean(0), -1)
-                #     h = -(distr.log() * distr).sum(-1) / np.log(
-                #         distr.shape[-1])
-                #     h = -h
-                #     entropies.append(h)
-                # for i in range(tid + 1):
-                #     distr = torch.softmax(
-                #         similarity[strategy.mb_task_id == i].mean(0), -1)
-                #     h = -(distr.log() * distr).sum(-1) / np.log(
-                #         distr.shape[-1])
-                #
-                #     if i == tid and not strategy.is_finetuning:
-                #         h = -h
-                #
-                #     es += h
-                #
-                # es = es / (tid + 1)
-                #
-                # entropies.append(es)
-
-                if tid == 0:
-                    labels = strategy.mb_y
-                else:
-                    offsets = [0] + list(self.tasks_nclasses.values())
-                    offsets = np.cumsum(offsets)
-
-                    offsets = [offsets[t.item()]
-                               for t in strategy.mb_task_id]
-                    offsets = torch.tensor(offsets, dtype=torch.long,
-                                           device=strategy.mb_y.device)
-
-                    labels = strategy.mb_y + offsets
-
-                all_h = 0
-                # uniques = torch.unique(labels)
-                uniques = torch.unique(strategy.mb_task_id)
-                centroids = []
-
-                for i in uniques:
-                    # mask = labels == i
-                    mask = strategy.mb_task_id == i
-                    # distr = torch.softmax(weights[mask].mean(0), -1)
-                    distr = weights[mask].mean(0)
-                    distr = distr[distr > 0]
-
-                    if len(distr) > 0:
-                        h = -(distr.log() * distr).sum(-1) / np.log(
-                            weights.shape[-1])
-                        all_h += h
-
-                entropies.append(all_h / len(uniques))
-
-                if tid > 0 or strategy.is_finetuning:
-                    for i in uniques:
-                        centroids.append(module.current_routing
-                                         [strategy.mb_task_id == i].mean(0))
-                        block_output, other_outputs = module.current_output
-                        other_outputs = other_outputs.mean(0)
-
-                        block_output, other_outputs = torch.flatten(
-                            block_output, 1), torch.flatten(other_outputs, 1)
-
-                        similarity = nn.functional.cosine_similarity(
-                            block_output, other_outputs)
-                        similarity = (similarity + 1).mean()
-                        distance_losses.append(similarity)
-
-                    # centroids = torch.stack(centroids, 0)
-                    #
-                    # similarity = torch.cosine_similarity(centroids[..., None, :, :],
-                    #                                      centroids[..., :, None, :],
-                    #                                      dim=-1)
-                    #
-                    # # centroids = nn.functional.normalize(centroids, 2, -1)
-                    # # distance = torch.norm(centroids[..., None, :, :]
-                    # #                       - centroids[..., :, None, :], 2, -1)
-                    # # similarity = 1 / (distance + 1)
-                    # similarity = (similarity + 1)
-                    # similarity = torch.triu(similarity, 1)
-                    # d = ((len(centroids) - 1) * len(centroids)) / 2
-                    # similarity = similarity.sum() / d
-                    # # similarity = -torch.log(similarity)
-                    #
-                    # distance_losses.append(similarity)
-
-                # print(similarity)
-
-                # if tid > 0:
-                #     # labels = [module.get_task_blocks(t.item())
-                #     #           for t in strategy.mb_task_id[~mask]]
-                #     # labels = torch.stack(labels, 0)
-                #     centroids = []
-                #     for y in uniques:
-                #         distr = torch.softmax(similarity[labels == y].mean(0),
-                #                               -1)
-                #
-                #     centroids = [
-                #         module.current_routing[strategy.mb_task_id == i].mean(0)
-                #         for i in range(tid + 1)]
-                #
-                # #     centroids = torch.stack(centroids, 0)
-                # #
-                # #     # distances = nn.PairwiseDistance(p=2)(centroids, centroids)
-                # #     distances = torch.cdist(centroids, centroids)
-                # #     distances = torch.triu(distances)
-                # #
-                # #     d = (len(centroids) - 1) * len(centroids)
-                # #     d = d / 2
-                # #
-                #
-                # if strategy.is_finetuning:
-                #     labels = [module.get_task_blocks(t.item())
-                #               for t in strategy.mb_task_id]
-                #     labels = torch.stack(labels, 0)
-                #     distr = torch.log_softmax(similarity, -1)
-                #     loss = -distr.gather(1, labels).squeeze()
-                #
-                #     # loss[~mask] *= 10
-                #
-                #     # loss = nn.functional.cross_entropy(similarity,
-                #     #                                    labels.squeeze())
-                #     classification_losses.append(loss.mean(0))
-                #
-                # elif tid > 0:
-                #     # h = -h
-                #     # if tid > 0:
-                #     # h[mask] = -h[mask]
-                #
-                #     # distr = torch.softmax(similarity, -1)
-                #     # h = -(distr.log() * distr).sum(-1) / np.log(
-                #     #     distr.shape[-1])
-                #     #
-                #     # if tid > 0:
-                #     #     h = h[mask]
-                #     # entropies.append(-h)
-                #     # if tid > 0:
-                #
-                #     # losses = torch.zeros_like(strategy.mb_task_id)
-                #
-                #     labels = [module.get_task_blocks(t.item())
-                #               for t in strategy.mb_task_id[~mask]]
-                #     labels = torch.stack(labels, 0)
-                #     # loss = -torch.log_softmax(similarity[~mask], -1) \
-                #     #     .gather(1, labels).squeeze().mean(0)
-                #     #
-                #     # preds = similarity[~mask].argmax(-1)
-                #
-                #     # losses[:len(loss)] = loss
-                #
-                #     # loss = -torch.log_softmax(similarity[~mask], -1)\
-                #     #     .gather(1, labels).squeeze()
-                #     # loss = loss[~mask]
-                #
-                #     # classification_losses.append(loss)
-                #
-                #     d = torch.log_softmax(similarity[mask], -1) \
-                #         .index_select(-1, torch.unique(labels))
-                #     d = d.squeeze().mean(-1).mean(0)
-                #
-                #     distance_losses.append(d)
-                #
-                #     # losses[len(loss):] = d
-                #     # a = 0
-
-        # else:
-        #     outputs = {}
-        #     past_output = self.past_model(strategy.mb_x, strategy.mb_task_id)
+        # all_loss = 0
+        # for t in all_tasks:
+        #     # if t == tid:
+        #     #     continue
         #
-        #     for name, module in self.past_model.named_modules():
-        #         if isinstance(module, (MoERoutingLayer,
-        #                                AbsDynamicLayer)):
-        #             weights, similarity = module.last_distribution
-        #             outputs[name] = weights
+        #     task_loss = 0
         #
-        #     mask = strategy.mb_task_id == tid
+        #     t_mask = tids == t
+        #     x_t = x[t_mask]
         #
-        #     for name, module in strategy.model.named_modules():
-        #         if isinstance(module, (MoERoutingLayer,
-        #                                AbsDynamicLayer)):
-        #             weights, similarity = module.last_distribution
+        #     # other_indexes = [l for i in range(tid + 1)
+        #     #                  for l in self.tasks_nclasses[i] if i != t.item()]
+        #     # other_indexes = torch.tensor(other_indexes, device=x.device)
+        #     # for t1 in range(t.item() + 1, tid + 1):
         #
-        #             if strategy.is_finetuning and tid > 0:
-        #                 distr = torch.log_softmax(similarity, -1)
-        #                 distr = distr * outputs[name]
-        #                 distr = distr.sum(-1) / outputs[name].sum(-1)
-        #                 loss = - distr
+        #     for t1 in all_tasks:
+        #         if t == t1:
+        #             continue
         #
-        #                 classification_losses.append(loss)
-        #             else:
-        #                 distr = torch.softmax(similarity, -1)
-        #                 h = -(distr.log() * distr).sum(-1) / np.log(
-        #                     weights.shape[-1])
-        #                 if tid > 0:
-        #                     h = h[mask]
-        #                 entropies.append(-h)
+        #         t1 = t1.item()
         #
-        #                 if tid > 0:
-        #                     sim = -torch.log_softmax(similarity[~mask], -1)
-        #                     past_selection = outputs[name][~mask]
+        #         i = max(self.tasks_nclasses[t1]) + 1
         #
-        #                     sim = sim * past_selection
-        #                     loss = sim.sum(-1) / past_selection.sum(-1)
-        #                     classification_losses.append(loss)
+        #         preds = strategy.model(x_t, t1, mask=False)
         #
-        #                     labels = [module.get_task_blocks(t.item())
-        #                               for t in strategy.mb_task_id[~mask]]
-        #                     labels = torch.stack(labels, 0)
-        #                     # loss = -torch.log_softmax(similarity[~mask], -1) \
-        #                     #     .gather(1, labels).squeeze()
-        #                     # loss = loss[~mask]
+        #         # if preds.shape[-1] != i:
+        #         #     indexes = [for idx ]
+        #         #     preds = preds[:, :i]
+        #         # preds = preds[:, self.tasks_nclasses[t1]]
+        #         # preds = preds[:, :i]
+        #         # preds = preds.index_select(-1, other_indexes)
         #
-        #                     d = torch.log_softmax(similarity[mask], -1) \
-        #                         .index_select(-1, torch.unique(labels))
-        #                     # d = -torch.log_softmax(similarity[~mask], -1).mean(-1)
-        #                     distance_losses.append(d.mean(-1))
-
-        if len(entropies) > 0:
-            entropy = sum(entropies) / len(entropies)
-            # entropy = sum(entropies)
-            # entropy = entropy.mean(0)
-        else:
-            entropy = 0
-
-        if len(classification_losses) > 0:
-            class_loss = sum(classification_losses) / len(
-                classification_losses)
-            class_loss = class_loss.mean(0)
-        else:
-            class_loss = 0
-
-        if len(distance_losses) > 0:
-            distance_loss = sum(distance_losses) / len(distance_losses)
-            distance_loss = distance_loss.mean(0)
-        else:
-            distance_loss = 0
-
-        strategy.loss += entropy * 1e-4 + class_loss * 0 + distance_loss * 100
-
-        return
-
-        # return
-        # self._bb_sigmoid(strategy)
-        self._bb_kl_div(strategy)
-        # self.___before_backward(strategy)
-
-    def _before_backward_distance(self, strategy, *args, **kwargs):
-
-        positive_w = 1
-        negative_r_w = 0
-        negative_t_w = 1
-
-        x = strategy.mb_x
-        tid = strategy.experience.current_experience
-
-        current_features = strategy.model.current_features
-        dev_x, _, _ = next(iter(DataLoader(strategy.experience.dev_dataset,
-                                           len(strategy.experience.dev_dataset))))
-        dev_x = dev_x.to(strategy.device)
-
-        current_centroids = strategy.model.features(dev_x, tid)
-        current_centroids = current_centroids.flatten(1).mean(0, keepdims=True)
-
-        current_features = current_features.flatten(1)
-
-        # curre = 0
-        dist = torch.norm(current_features - current_centroids, 2, -1)
-        dist = torch.maximum(torch.zeros_like(dist), dist - 0.5)
-
-        positive_distance = dist.mean()
-        # loss += dist.mean()
-
-        d = 1
-        negative_r_distance = 0
-        negative_t_distance = 0
-
-        if negative_r_w > 0:
-            paths = strategy.model.get_random_paths(5)
-            for p in paths:
-                d += 1
-
-                f = strategy.model.features(dev_x, None, p)
-                f = f.mean(0, keepdims=True).flatten(1)
-
-                f1 = strategy.model.features(x, None, p).flatten(1)
-
-                dist = torch.norm(f1 - f, 2, -1)
-                sim = 1 / dist
-                # sim = torch.maximum(torch.zeros_like(sim), sim - 0.5)
-
-                negative_r_distance += sim.mean()
-
-        # for f in strategy.model.random_path_forward(dev_x, 5):
-        #     d += 1
-        #     # for _ in range(5):
-        #     #     f = strategy.model.random_path_forward(dev_x)
-        #     f = f.mean(0, keepdims=True).flatten(1)
+        #         preds = torch.softmax(preds, -1)
+        #         mask = preds != 0.0
+        #         d = mask.sum(-1)
         #
-        #     dist = torch.norm(current_features - f, 2, -1)
-        #     sim = 1 / dist
-        #     sim = torch.maximum(torch.zeros_like(sim), sim - 0.5)
+        #         # h = -(preds.log() * preds)
+        #         # h = h.sum(-1) / np.log(preds.shape[-1])
+        #         # h = h.sum(-1)
+        #         # h = h[mask].sum(-1)
+        #         # a = torch.any(d != preds.shape[-1])
+        #         h = torch.where(mask,
+        #                         -(preds.log() * preds), 0).sum(-1)
+        #         h = h / torch.log(d)
         #
-        #     negative_r_distance += sim.mean()
-
-        for i in range(tid):
-            d += 1
-            f = strategy.model.features(x, i).flatten(1)
-            # f = f.mean(0, keepdims=True).flatten(1        )
-
-            x, _, _ = next(iter(DataLoader(self.past_dataset[i],
-                                           len(x), shuffle=True)))
-            x = x.to(strategy.device)
-
-            f1 = strategy.model.features(x, i).flatten(1).mean(0, keepdims=True)
-
-            # f1 = strategy.model.features(x, i, None).flatten(1)
-            # f1 = self.centroids[i]
-
-            # dist = torch.norm(current_features - f, 2, -1)
-            dist = torch.norm(f1 - f, 2, -1)
-
-            sim = 1 / dist
-            sim = torch.maximum(torch.zeros_like(sim), sim - 0.5)
-            negative_t_distance += sim.mean()
-
-        loss = (positive_distance * positive_w +
-                negative_r_distance * negative_r_w +
-                negative_t_distance * negative_t_w) / d
-
-        strategy.loss += loss * 0.1
-
-        past_reg = 0
-        for i in range(tid):
-            x, _, _ = next(iter(DataLoader(self.past_dataset[i],
-                                           len(x), shuffle=True)))
-            x = x.to(strategy.device)
-
-            past_centroids = self.past_model.features(x, i).flatten(1)
-            current_centroids = strategy.model.features(x, i).flatten(1)
-
-            # sim = nn.functional.cosine_similarity(past_centroids, current_centroids)
-            # dist = 1 - sim
-
-            dist = nn.functional.mse_loss(current_centroids, past_centroids)
-
-            past_reg += dist.mean()
-
-        strategy.loss += past_reg * 1
-
-        return
-        entropies = []
-        classification_losses = []
-        distance_losses = []
-        mask = strategy.mb_task_id == tid
-
-        # if tid == 0 and strategy.is_finetuning:
-        #     return
-
-        if tid > 0:
-            self.past_model.eval()
-
-            _x = strategy.mb_x[~mask]
-            # past_routing = self.past_model.routing_model(_x)
-
-            # current_routing = strategy.mb_output
-            #
-            # norm = torch.norm(past_routing - current_routing, 2, -1).mean()
-            #     # strategy.loss += norm
-            #     # print(norm)
-            #
-            #     _x = strategy.mb_x[~mask]
-            #     t = strategy.mb_task_id[~mask]
-            #     # _x = strategy.mb_x
-
-            with torch.no_grad():
-                self.past_model(_x, strategy.mb_task_id[~mask])
-                past_routing = {}
-
-                for name, module in self.past_model.named_modules():
-                    if isinstance(module, (
-                            AbsDynamicLayer)):
-                        past_routing[name] = torch.argmax(
-                            module.last_distribution[0], -1)
-                        # past_routing[name] = torch.softmax(
-                        #     module.last_distribution[1],
-                        #     -1)
-
-            d = 0
-            for name, module in strategy.model.named_modules():
-                if isinstance(module, (
-                        AbsDynamicLayer)):
-                    # distr = torch.log_softmax(
-                    #     module.last_distribution[1][~mask], -1)
-                    # similarity = cosine_similarity(
-                    #     module.current_routing[~mask],
-                    #     past_routing[name])
-                    # loss = nn.functional.kl_div(distr, past_routing[name])
-                    loss = nn.functional.cross_entropy(
-                        module.last_distribution[1][~mask],
-                        past_routing[name])
-                    # distance = 1 - similarity
-                    # distance = distance.mean(0)
-
-                    # distance = nn.functional.mse_loss(
-                    #     module.current_routing[~mask],
-                    #     past_routing[name])
-                    d += loss
-
-            distance = d / 3
-
-            strategy.loss += distance * 0
-
-        for name, module in strategy.model.named_modules():
-            if isinstance(module, (AbsDynamicLayer)):
-                weights, similarity = module.last_distribution
-
-                # if strategy.is_finetuning:
-                #     toiter =
-                # else:
-                #     toiter = range(tid)
-                # if not strategy.is_finetuning:
-                #     distr = torch.softmax(similarity[mask].mean(0), -1)
-                #     h = -(distr.log() * distr).sum(-1) / np.log(
-                #         distr.shape[-1])
-                #     h = -h
-                #     entropies.append(h)
-                # for i in range(tid + 1):
-                #     distr = torch.softmax(
-                #         similarity[strategy.mb_task_id == i].mean(0), -1)
-                #     h = -(distr.log() * distr).sum(-1) / np.log(
-                #         distr.shape[-1])
-                #
-                #     if i == tid and not strategy.is_finetuning:
-                #         h = -h
-                #
-                #     es += h
-                #
-                # es = es / (tid + 1)
-                #
-                # entropies.append(es)
-
-                if tid == 0:
-                    labels = strategy.mb_y
-                else:
-                    offsets = [0] + list(self.tasks_nclasses.values())
-                    offsets = np.cumsum(offsets)
-
-                    offsets = [offsets[t.item()]
-                               for t in strategy.mb_task_id]
-                    offsets = torch.tensor(offsets, dtype=torch.long,
-                                           device=strategy.mb_y.device)
-
-                    labels = strategy.mb_y + offsets
-
-                all_h = 0
-                # uniques = torch.unique(labels)
-                uniques = torch.unique(strategy.mb_task_id)
-                centroids = []
-
-                for i in uniques:
-                    # mask = labels == i
-                    mask = strategy.mb_task_id == i
-                    # distr = torch.softmax(weights[mask].mean(0), -1)
-                    distr = weights[mask].mean(0)
-                    distr = distr[distr > 0]
-
-                    if len(distr) > 0:
-                        h = -(distr.log() * distr).sum(-1) / np.log(
-                            weights.shape[-1])
-                        all_h += h
-
-                entropies.append(all_h / len(uniques))
-
-                if tid > 0 or strategy.is_finetuning:
-                    for i in uniques:
-                        centroids.append(module.current_routing
-                                         [strategy.mb_task_id == i].mean(0))
-                        block_output, other_outputs = module.current_output
-                        other_outputs = other_outputs.mean(0)
-
-                        block_output, other_outputs = torch.flatten(
-                            block_output, 1), torch.flatten(other_outputs, 1)
-
-                        similarity = nn.functional.cosine_similarity(
-                            block_output, other_outputs)
-                        similarity = (similarity + 1).mean()
-                        distance_losses.append(similarity)
-
-                    # centroids = torch.stack(centroids, 0)
-                    #
-                    # similarity = torch.cosine_similarity(centroids[..., None, :, :],
-                    #                                      centroids[..., :, None, :],
-                    #                                      dim=-1)
-                    #
-                    # # centroids = nn.functional.normalize(centroids, 2, -1)
-                    # # distance = torch.norm(centroids[..., None, :, :]
-                    # #                       - centroids[..., :, None, :], 2, -1)
-                    # # similarity = 1 / (distance + 1)
-                    # similarity = (similarity + 1)
-                    # similarity = torch.triu(similarity, 1)
-                    # d = ((len(centroids) - 1) * len(centroids)) / 2
-                    # similarity = similarity.sum() / d
-                    # # similarity = -torch.log(similarity)
-                    #
-                    # distance_losses.append(similarity)
-
-                # print(similarity)
-
-                # if tid > 0:
-                #     # labels = [module.get_task_blocks(t.item())
-                #     #           for t in strategy.mb_task_id[~mask]]
-                #     # labels = torch.stack(labels, 0)
-                #     centroids = []
-                #     for y in uniques:
-                #         distr = torch.softmax(similarity[labels == y].mean(0),
-                #                               -1)
-                #
-                #     centroids = [
-                #         module.current_routing[strategy.mb_task_id == i].mean(0)
-                #         for i in range(tid + 1)]
-                #
-                # #     centroids = torch.stack(centroids, 0)
-                # #
-                # #     # distances = nn.PairwiseDistance(p=2)(centroids, centroids)
-                # #     distances = torch.cdist(centroids, centroids)
-                # #     distances = torch.triu(distances)
-                # #
-                # #     d = (len(centroids) - 1) * len(centroids)
-                # #     d = d / 2
-                # #
-                #
-                # if strategy.is_finetuning:
-                #     labels = [module.get_task_blocks(t.item())
-                #               for t in strategy.mb_task_id]
-                #     labels = torch.stack(labels, 0)
-                #     distr = torch.log_softmax(similarity, -1)
-                #     loss = -distr.gather(1, labels).squeeze()
-                #
-                #     # loss[~mask] *= 10
-                #
-                #     # loss = nn.functional.cross_entropy(similarity,
-                #     #                                    labels.squeeze())
-                #     classification_losses.append(loss.mean(0))
-                #
-                # elif tid > 0:
-                #     # h = -h
-                #     # if tid > 0:
-                #     # h[mask] = -h[mask]
-                #
-                #     # distr = torch.softmax(similarity, -1)
-                #     # h = -(distr.log() * distr).sum(-1) / np.log(
-                #     #     distr.shape[-1])
-                #     #
-                #     # if tid > 0:
-                #     #     h = h[mask]
-                #     # entropies.append(-h)
-                #     # if tid > 0:
-                #
-                #     # losses = torch.zeros_like(strategy.mb_task_id)
-                #
-                #     labels = [module.get_task_blocks(t.item())
-                #               for t in strategy.mb_task_id[~mask]]
-                #     labels = torch.stack(labels, 0)
-                #     # loss = -torch.log_softmax(similarity[~mask], -1) \
-                #     #     .gather(1, labels).squeeze().mean(0)
-                #     #
-                #     # preds = similarity[~mask].argmax(-1)
-                #
-                #     # losses[:len(loss)] = loss
-                #
-                #     # loss = -torch.log_softmax(similarity[~mask], -1)\
-                #     #     .gather(1, labels).squeeze()
-                #     # loss = loss[~mask]
-                #
-                #     # classification_losses.append(loss)
-                #
-                #     d = torch.log_softmax(similarity[mask], -1) \
-                #         .index_select(-1, torch.unique(labels))
-                #     d = d.squeeze().mean(-1).mean(0)
-                #
-                #     distance_losses.append(d)
-                #
-                #     # losses[len(loss):] = d
-                #     # a = 0
-
-        # else:
-        #     outputs = {}
-        #     past_output = self.past_model(strategy.mb_x, strategy.mb_task_id)
+        #         # h = h[~torch.isnan(h)]
+        #         # h = torch.nan_to_num(h, 1)
+        #         h = 1 - h
+        #         # if t1 != t:
+        #         #     h = -h
+        #         #     continue
+        #         # h = - h
         #
-        #     for name, module in self.past_model.named_modules():
-        #         if isinstance(module, (MoERoutingLayer,
-        #                                AbsDynamicLayer)):
-        #             weights, similarity = module.last_distribution
-        #             outputs[name] = weights
+        #         matrix[t.item(), t1] = h.mean()
         #
-        #     mask = strategy.mb_task_id == tid
+        #         task_loss += h.mean()
         #
-        #     for name, module in strategy.model.named_modules():
-        #         if isinstance(module, (MoERoutingLayer,
-        #                                AbsDynamicLayer)):
-        #             weights, similarity = module.last_distribution
+        #     all_loss += task_loss
         #
-        #             if strategy.is_finetuning and tid > 0:
-        #                 distr = torch.log_softmax(similarity, -1)
-        #                 distr = distr * outputs[name]
-        #                 distr = distr.sum(-1) / outputs[name].sum(-1)
-        #                 loss = - distr
+        # # norm = matrix.sum() / (len(matrix) ** 2)
         #
-        #                 classification_losses.append(loss)
-        #             else:
-        #                 distr = torch.softmax(similarity, -1)
-        #                 h = -(distr.log() * distr).sum(-1) / np.log(
-        #                     weights.shape[-1])
-        #                 if tid > 0:
-        #                     h = h[mask]
-        #                 entropies.append(-h)
-        #
-        #                 if tid > 0:
-        #                     sim = -torch.log_softmax(similarity[~mask], -1)
-        #                     past_selection = outputs[name][~mask]
-        #
-        #                     sim = sim * past_selection
-        #                     loss = sim.sum(-1) / past_selection.sum(-1)
-        #                     classification_losses.append(loss)
-        #
-        #                     labels = [module.get_task_blocks(t.item())
-        #                               for t in strategy.mb_task_id[~mask]]
-        #                     labels = torch.stack(labels, 0)
-        #                     # loss = -torch.log_softmax(similarity[~mask], -1) \
-        #                     #     .gather(1, labels).squeeze()
-        #                     # loss = loss[~mask]
-        #
-        #                     d = torch.log_softmax(similarity[mask], -1) \
-        #                         .index_select(-1, torch.unique(labels))
-        #                     # d = -torch.log_softmax(similarity[~mask], -1).mean(-1)
-        #                     distance_losses.append(d.mean(-1))
+        # distance = matrix
+        # norm = torch.linalg.matrix_norm(distance)
+        # strategy.loss += norm * 1
 
-        if len(entropies) > 0:
-            entropy = sum(entropies) / len(entropies)
-            # entropy = sum(entropies)
-            # entropy = entropy.mean(0)
-        else:
-            entropy = 0
+        # all_loss = all_loss / (tid + 1)
+        # strategy.loss += all_loss * 1
 
-        if len(classification_losses) > 0:
-            class_loss = sum(classification_losses) / len(
-                classification_losses)
-            class_loss = class_loss.mean(0)
-        else:
-            class_loss = 0
+        ot_x, ot_y, ot_t = next(
+            iter(DataLoader(self.av, batch_size=strategy.train_mb_size,
+                            shuffle=True)))
 
-        if len(distance_losses) > 0:
-            distance_loss = sum(distance_losses) / len(distance_losses)
-            distance_loss = distance_loss.mean(0)
-        else:
-            distance_loss = 0
+        ot_x = ot_x.to(strategy.device)
+        # mask = tids != tid
+        # x = x[mask]
+        # tids = tids[mask]
+        with torch.no_grad():
+            past_logits = self.past_model(ot_x, ot_t)
 
-        strategy.loss += entropy * 1e-4 + class_loss * 0 + distance_loss * 100
+        strategy.model(ot_x, ot_t)
 
-        return
+        # current_logits = strategy.model(ot_x, ot_t)
+        #
+        # loss = nn.functional.mse_loss(current_logits,
+        #                               past_logits)
 
-        # return
-        # self._bb_sigmoid(strategy)
-        self._bb_kl_div(strategy)
-        # self.___before_backward(strategy)
+        loss = nn.functional.cosine_similarity(strategy.model.current_features,
+                                               self.past_model.current_features,
+                                               -1).mean()
+        # loss = (loss + 1) / 2
+        loss = 1 - loss
+        # loss = loss.mean()
+
+        strategy.loss += loss * 1
 
     # def _before_backward_distance(self, strategy, *args, **kwargs):
     #     tid = strategy.experience.current_experience
@@ -1867,28 +836,28 @@ class Trainer(SupervisedTemplate):
             self.training_epoch(**kwargs)
             self._after_training_epoch(**kwargs)
 
-    def train_dataset_adaptation(self, **kwargs):
-        """ Initialize `self.adapted_dataset`. """
-
-        if not hasattr(self.experience, 'dev_dataset'):
-            dataset = self.experience.dataset
-
-            idx = np.arange(len(dataset))
-            np.random.shuffle(idx)
-
-            if isinstance(self.dev_split_size, int):
-                dev_i = self.dev_split_size
-            else:
-                dev_i = int(len(idx) * self.dev_split_size)
-
-            dev_idx = idx[:dev_i]
-            train_idx = idx[dev_i:]
-
-            self.experience.dataset = dataset.train().subset(train_idx)
-            # self.experience.dev_dataset = dataset.eval().subset(dev_idx)
-            self.experience.dev_dataset = dataset.train().subset(dev_idx)
-
-        self.adapted_dataset = self.experience.dataset
+    # def train_dataset_adaptation(self, **kwargs):
+    #     """ Initialize `self.adapted_dataset`. """
+    #
+    #     if not hasattr(self.experience, 'dev_dataset'):
+    #         dataset = self.experience.dataset
+    #
+    #         idx = np.arange(len(dataset))
+    #         np.random.shuffle(idx)
+    #
+    #         if isinstance(self.dev_split_size, int):
+    #             dev_i = self.dev_split_size
+    #         else:
+    #             dev_i = int(len(idx) * self.dev_split_size)
+    #
+    #         dev_idx = idx[:dev_i]
+    #         train_idx = idx[dev_i:]
+    #
+    #         self.experience.dataset = dataset.train().subset(train_idx)
+    #         # self.experience.dev_dataset = dataset.eval().subset(dev_idx)
+    #         self.experience.dev_dataset = dataset.train().subset(dev_idx)
+    #
+    #     self.adapted_dataset = self.experience.dataset
 
 
 class CustomBlockModel(MultiTaskModule):
@@ -1909,9 +878,10 @@ class CustomBlockModel(MultiTaskModule):
         self.layers.append(RoutingLayer(3, 32))
         self.layers.append(RoutingLayer(32, 64))
         self.layers.append(RoutingLayer(64, 128))
+        self.layers.append(RoutingLayer(128, 256))
 
         self.mx = nn.AdaptiveAvgPool2d(2)
-        self.in_features = 128 * 4
+        self.in_features = 256 * 4
 
         self.task_classifier = None
         self.p = nn.Sequential(nn.Linear(512, 256),
@@ -1926,8 +896,8 @@ class CustomBlockModel(MultiTaskModule):
                                                initial_out_features=2,
                                                masking=False)
 
-        self.classifiers = CumulativeMultiHeadClassifier(self.in_features,
-                                                         initial_out_features=2)
+        # self.classifiers = CumulativeMultiHeadClassifier(self.in_features,
+        #                                                  initial_out_features=2)
 
         layers_blocks = [len(l.blocks) for l in self.layers]
         paths = []
@@ -1989,7 +959,6 @@ class CustomBlockModel(MultiTaskModule):
     #         self.task_classifier = torch.nn.Linear(in_features, new_nclasses)
     #         self.task_classifier.weight.data[:old_nclasses] = old_w.data
     #         self.task_classifier.bias.data[:old_nclasses] = old_b.data
-
     #
     #     self.embeddings.append(e)
     #
@@ -2048,7 +1017,7 @@ class CustomBlockModel(MultiTaskModule):
 
         self.current_features = features
 
-        # return out / torch.norm(out, 2, -1, keepdim=True)
+        # return out / (torch.norm(out, 2, -1, keepdim=True) * 10)
         return out
 
     def features(self, x, task_labels=None, path_id=None, **kwargs):
@@ -2056,7 +1025,7 @@ class CustomBlockModel(MultiTaskModule):
         for l in self.layers[:-1]:
             x = torch.relu(l(x, task_labels, path_id))
 
-        x = self.layers[-1](x, task_labels, path_id)
+        x = self.layers[-1](x, task_labels, path_id).relu()
 
         x = self.mx(x).flatten(1)
 
@@ -2201,7 +1170,7 @@ def train(train_stream, test_stream, theta=1, train_epochs=1,
 
     criterion = CrossEntropyLoss()
 
-    optimizer = Adam(complete_model.parameters(), lr=0.001)
+    optimizer = Adam(complete_model.parameters(), lr=0.001, weight_decay=1e-4)
     # optimizer = SGD(complete_model.parameters(), lr=0.1)
 
     eval_plugin = EvaluationPlugin(
@@ -2231,51 +1200,79 @@ def train(train_stream, test_stream, theta=1, train_epochs=1,
             print(l.tasks_path)
 
         centroids = trainer.base_plugin.centroids
+
+        if current_task_id == 0:
+            continue
+
         with torch.no_grad():
 
             m = np.zeros((current_task_id + 1, current_task_id + 1))
 
             for i in range(len(test_stream[:current_task_id + 1])):
-                t, c = 0, 0
+                t_t, t_c = 0, 0
+                c_t, c_c = 0, 0
+                labels = []
 
-                for x, y, _ in DataLoader(test_stream[i].dataset,
-                                          batch_size=1000,
-                                          shuffle=True):
+                vals = []
+                rmx = []
 
-                    vals = []
-                    x = x.to(device)
+                for j in range(len(test_stream[:current_task_id + 1])):
+                    task_vals = []
+                    task_max = []
 
-                    # x, y, t = next(iter(DataLoader(test_stream[i].dataset,
-                    #                                batch_size=1000,
-                    #                                shuffle=True)))
+                    # for x, y, _ in DataLoader(test_stream[i].dataset,
+                    #                           batch_size=1000,
+                    #                           shuffle=False):
+                    for x, y, _ in DataLoader(trainer.base_plugin.past_dataset[i],
+                                              batch_size=1000,
+                                              shuffle=False):
+                        x = x.to(device)
+                        y = y.to(device)
 
-                    for j in range(len(test_stream[:current_task_id + 1])):
-                        pred = complete_model(x, j, mask=True)
-                        pred = pred[:, test_stream[i].classes_in_this_experience]
+                        if j == 0:
+                            labels.append(y)
 
-                        # print(i, j, pred.mean(0))
+                        pred = complete_model(x, j)
+                        # pred = pred[:, max(test_stream[j].classes_in_this_experience) + 1]
+                        task_max.append(pred.argmax(-1))
+
+                        pred = pred[:, test_stream[j].classes_in_this_experience]
 
                         preds = torch.softmax(pred, -1)
                         h = -(preds.log() * preds).sum(-1)
                         h = h / np.log(preds.shape[-1])
 
-                        vals.append(h)
+                        task_vals.append(h)
 
-                        m[i, j] += h.mean().item()
+                        m[i, j] += h.sum().item()
 
-                    # print(h.mean())
+                    task_vals = torch.cat(task_vals, 0)
+                    task_max = torch.cat(task_max, 0)
 
-                    vals = torch.stack(vals, -1)
-                    task_pred = vals.argmin(-1)
-                    correct = (task_pred == i).sum()
+                    vals.append(task_vals)
+                    rmx.append(task_max)
 
-                    c += correct.item()
-                    t += len(x)
+                labels = torch.cat(labels, 0)
+                vals = torch.stack(vals, -1)
+                rmx = torch.stack(rmx, -1)
 
-                print(i, t, c, c / t)
+                task_pred = vals.argmin(-1)
+                mask = task_pred == i
+
+                # preds = torch.stack(rmx, -1)[task_pred]
+
+                t_c += mask.sum().item()
+                c_c += (rmx.gather(-1, task_pred[:, None]).squeeze() == labels).sum().item()
+
+                t_t += len(labels)
+                c_t += len(labels)
+
+                print(i, t_t, t_c, t_c / t_t)
+                print(i, c_t, c_c, c_c / c_t)
                 print(i, torch.bincount(task_pred))
 
             if current_task_id > 0 or True:
+                m = m / t_t
 
                 fig, ax = plt.subplots()
                 im = ax.matshow(m)
@@ -2283,9 +1280,9 @@ def train(train_stream, test_stream, theta=1, train_epochs=1,
 
                 for i in range(len(m)):
                     for j in range(len(m)):
-                        c = m[j, i]
-                        ax.text(i, j, f'{c:.2f}', va='center', ha='center',
-                                color=("black", "white")[int(c < 0.65)])
+                        t_c = m[j, i]
+                        ax.text(i, j, f'{t_c:.2f}', va='center', ha='center',
+                                color=("black", "white")[int(t_c < 0.65)])
 
                 plt.colorbar(im)
                 plt.ylabel('Source task')
@@ -2385,14 +1382,14 @@ def train(train_stream, test_stream, theta=1, train_epochs=1,
                 # x, y, t = next(iter(DataLoader(test_stream[i].dataset,
                 #                                batch_size=128,
                 #                                shuffle=True)))
-                x, y, t = next(
+                x, y, t_t = next(
                     iter(DataLoader(trainer.base_plugin.past_dataset[i],
                                     batch_size=128,
                                     shuffle=True)))
                 x = x.to(device)
 
                 # for _ in range(5):
-                pred = trainer.model(x, t.to(device))
+                pred = trainer.model(x, t_t.to(device))
                 # print(torch.softmax(pred, -1))
 
                 # print(trainer.model.
@@ -2405,7 +1402,7 @@ def train(train_stream, test_stream, theta=1, train_epochs=1,
                 print()
 
             for i in range(len(test_stream[:current_task_id + 1])):
-                x, y, t = next(iter(DataLoader(test_stream[i].dataset,
+                x, y, t_t = next(iter(DataLoader(test_stream[i].dataset,
                                                batch_size=128,
                                                shuffle=True)))
                 # x, y, t = next(iter(DataLoader(trainer.base_plugin.past_dataset[i],
@@ -2414,7 +1411,7 @@ def train(train_stream, test_stream, theta=1, train_epochs=1,
                 x = x.to(device)
 
                 # for _ in range(5):
-                pred = trainer.model(x, t.to(device))
+                pred = trainer.model(x, t_t.to(device))
                 # print(torch.softmax(pred, -1))
 
                 # print(trainer.model.
@@ -2480,18 +1477,17 @@ if __name__ == '__main__':
         n_experiences=5,
         shuffle=True,
         task_labels=True,
-        class_ids_from_zero_in_each_exp=False,
-        class_ids_from_zero_from_first_exp=True,
+        class_ids_from_zero_in_each_exp=True,
+        class_ids_from_zero_from_first_exp=False,
         train_transform=_default_cifar10_train_transform,
         eval_transform=_default_cifar10_eval_transform)
-
     cifar10_train_stream = perm_mnist.train_stream
     cifar10_test_stream = perm_mnist.test_stream
 
     train_tasks = cifar10_train_stream
     test_tasks = cifar10_test_stream
 
-    model = train(train_epochs=1,
+    model = train(train_epochs=2,
                   fine_tune_epochs=0,
                   train_stream=train_tasks,
                   test_stream=test_tasks)

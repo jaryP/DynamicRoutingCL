@@ -81,10 +81,9 @@ class CumulativeMultiHeadClassifier(MultiTaskModule):
         :return:
         """
 
-        # return self.classifiers[str(task_label)](x)
+        return self.classifiers[str(task_label)](x)
 
-        # out = torch.cat([c(x)
-        #                for c in self.classifiers.values()], -1)
+        # out = torch.cat([c(x) for c in self.classifiers.values()], -1)
         #
         # return out
 
@@ -99,7 +98,7 @@ class CumulativeMultiHeadClassifier(MultiTaskModule):
 
         diff = abs(self.classes_so_far - out.shape[-1])
 
-        if diff != 0:
+        if diff != 0 and mask:
             # out = torch.zeros(len(o), self.classes_so_far, device=o.device)
             out = nn.functional.pad(out, (0, diff), value=0)
             # out[:, :o.shape[-1]] = o

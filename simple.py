@@ -127,7 +127,7 @@ class SIMPLE(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output):
         logits = ctx.saved_tensors
-        _, tangent_out = ft.jvp(ft.grad(
+        _, tangent_out =  torch.func.jvp( torch.func.grad(
             lambda logits: marginals(logits, 2)[:, -1,
                            ctx.k + 1:ctx.k + 2].sum()), logits, (grad_output,))
         return tangent_out, None

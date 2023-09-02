@@ -159,7 +159,7 @@ class CentroidsMatching(SupervisedPlugin):
         super().__init__()
 
         self.distributions = {}
-        self.patterns_per_experience = 50
+        self.patterns_per_experience = 500
         self.top_k = top_k
         self.per_sample_routing_reg = per_sample_routing_reg
 
@@ -199,10 +199,11 @@ class CentroidsMatching(SupervisedPlugin):
         # self.past_model = deepcopy(strategy.model)
 
         av = AvalancheDataset(list(self.past_dataset.values()))
+
         # av.concat()
         strategy.dataloader = ReplayDataLoader(
             strategy.adapted_dataset,
-            av,
+            self.past_dataset[0],
             oversample_small_tasks=True,
             batch_size=strategy.train_mb_size,
             batch_size_mem=strategy.train_mb_size,
@@ -219,6 +220,7 @@ class CentroidsMatching(SupervisedPlugin):
                 module.similarity_statistics = []
 
     def after_finetuning_exp(self, strategy: 'BaseStrategy', **kwargs):
+        # return
         tid = strategy.experience.current_experience
 
         for module in strategy.model.modules():
@@ -284,11 +286,11 @@ class CentroidsMatching(SupervisedPlugin):
         memory = dataset.train().subset(idx_to_get)
         self.past_dataset[t] = memory
 
-    def before_backward(self, strategy, *args, **kwargs):
-        # self.before_backward_kl(strategy, args, kwargs)
-        self.before_backward_distance(strategy, args, kwargs)
+    # def before_backward(self, strategy, *args, **kwargs):
+    #     # self.before_backward_kl(strategy, args, kwargs)
+    #     self.before_backward_distance(strategy, args, kwargs)
 
-    def before_backward_distance(self, strategy, *args, **kwargs):
+    def before_backward(self, strategy, *args, **kwargs):
         tid = strategy.experience.current_experience
 
         entropies = []
@@ -296,17 +298,25 @@ class CentroidsMatching(SupervisedPlugin):
         distance_losses = []
         mask = strategy.mb_task_id == tid
 
-        if tid == 0 and strategy.is_finetuning:
+        if tid == 0 and not strategy.is_finetuning:
             return
 
-        if tid > 0:
-            _x = strategy.mb_x[~mask]
-            past_routing = self.past_model.routing_model(_x)
-            current_routing = strategy.model.current_routing[~mask]
-
-            distance = 1 - cosine_similarity(current_routing, past_routing)
-
-            strategy.loss += distance.mean(0) * 0.5
+        # if tid > 0:
+        #     # _x = strategy.mb_x
+        #     # past_routing = self.past_model(_x)
+        #     # current_routing = strategy.mb_output
+        #     #
+        #     # norm = torch.norm(past_routing - current_routing, 2, -1).mean()
+        #     # strategy.loss += norm
+        #     # print(norm)
+        #
+        #     _x = strategy.mb_x[~mask]
+        #     past_routing = self.past_model.routing_model(_x)
+        #     current_routing = strategy.model.current_routing[~mask]
+        #
+        #     distance = 1 - cosine_similarity(current_routing, past_routing)
+        #
+        #     strategy.loss += distance.mean(0) * 0.1
 
         if not self.per_sample_routing_reg or tid == 0:
             for name, module in strategy.model.named_modules():
@@ -340,8 +350,9 @@ class CentroidsMatching(SupervisedPlugin):
 
                             classification_losses.append(loss)
 
-                            d = distr.index_select(-1, torch.unique(labels))
-                            d = d[mask].log().mean(-1)
+                            d = torch.log_softmax(similarity[mask], -1) \
+                                .index_select(-1, torch.unique(labels))
+                            d = d.squeeze().mean(-1)
                             distance_losses.append(d)
         else:
             outputs = {}
@@ -414,7 +425,7 @@ class CentroidsMatching(SupervisedPlugin):
         else:
             distance_loss = 0
 
-        strategy.loss += entropy + class_loss * 1 + distance_loss * 0
+        strategy.loss += entropy * 1 + class_loss * 1 + distance_loss * 1
 
         return
 
@@ -1492,11 +1503,11 @@ class CustomBlockModel(MultiTaskModule):
         self.current_routing = None
         self.hidden_features = None
 
-        # self.embeddings = nn.Embedding(2, 20)
+        # self.embeddings = nn.Embedding(10, 20)
         self.embeddings = None
 
         self.cv1 = DynamicMoERoutingLayer(3, 32,
-                                          input_routing_size=512,
+                                          input_routing_size=256,
                                           input_routing_f=nn.Sequential(
                                               # nn.Conv2d(3, 3, 3),
                                               nn.AdaptiveAvgPool2d(
@@ -1504,7 +1515,7 @@ class CustomBlockModel(MultiTaskModule):
                                           ))
 
         self.cv2 = DynamicMoERoutingLayer(32, 64,
-                                          input_routing_size=512,
+                                          input_routing_size=256,
                                           input_routing_f=nn.Sequential(
                                               # nn.Conv2d(3, 3, 3),1
                                               nn.AdaptiveAvgPool2d(
@@ -1512,7 +1523,23 @@ class CustomBlockModel(MultiTaskModule):
                                           ))
 
         self.cv3 = DynamicMoERoutingLayer(64, 128,
-                                          input_routing_size=512,
+                                          input_routing_size=256,
+                                          input_routing_f=nn.Sequential(
+                                              # nn.Conv2d(3, 3, 3),
+                                              nn.AdaptiveAvgPool2d(
+                                                  4)
+                                          ))
+
+        self.cv4 = DynamicMoERoutingLayer(128, 128,
+                                          input_routing_size=256,
+                                          input_routing_f=nn.Sequential(
+                                              # nn.Conv2d(3, 3, 3),
+                                              nn.AdaptiveAvgPool2d(
+                                                  4)
+                                          ))
+
+        self.cv5 = DynamicMoERoutingLayer(128, 128,
+                                          input_routing_size=256,
                                           input_routing_f=nn.Sequential(
                                               # nn.Conv2d(3, 3, 3),
                                               nn.AdaptiveAvgPool2d(
@@ -1547,7 +1574,7 @@ class CustomBlockModel(MultiTaskModule):
         #                            )
 
         self.mx = nn.AdaptiveAvgPool2d(2)
-        self.in_features = 128 * 3 * 3
+        self.in_features = 128 * 2 * 2
 
         # self.classifiers = HeadsRoutingLayer(128 * 4,
         #                                      3 * 16 * 3 + 20,
@@ -1563,15 +1590,19 @@ class CustomBlockModel(MultiTaskModule):
         # self.routing_model = torchvision.models.resnet18(pretrained=True)
         # self.routing_model.fc = EmptyModule()
 
-        self.routing_model = nn.Sequential(nn.Conv2d(3, 32, 3, 1),
+        self.routing_model = nn.Sequential(nn.Conv2d(3, 32, 3, 2),
                                            nn.ReLU(),
-                                           nn.AvgPool2d(2),
-                                           nn.Conv2d(32, 64, 3, 1),
+                                           # nn.AvgPool2d(2),
+                                           nn.Conv2d(32, 64, 3, 2),
                                            nn.ReLU(),
-                                           nn.AvgPool2d(2),
-                                           nn.Conv2d(64, 128, 3, 1),
-                                           nn.AdaptiveAvgPool2d(2),
-                                           nn.Flatten(1)
+                                           # nn.AvgPool2d(2),
+                                           nn.Conv2d(64, 128, 3, 2),
+                                           nn.ReLU(),
+                                           nn.Conv2d(128, 256, 3, 2),
+                                           # nn.AdaptiveAvgPool2d(2),
+                                           # nn.ReLU(),
+                                           nn.Flatten(1),
+                                           # nn.Linear(256 * 4, 64)
                                            )
 
     # def adaptation(self, dataset: CLExperience):
@@ -1603,7 +1634,10 @@ class CustomBlockModel(MultiTaskModule):
     def forward(self, x: torch.Tensor, task_labels: torch.Tensor, **kwargs) \
             -> torch.Tensor:
 
+        # te = self.embeddings(task_labels)
         routing = self.routing_model(x)
+        # routing = torch.cat((routing, te), -1)
+
         self.current_routing = routing
 
         x = self.features(x, task_labels, routing_vector=routing, tau=None)
@@ -1647,14 +1681,16 @@ class CustomBlockModel(MultiTaskModule):
         x = torch.relu(
             self.cv2(x, task_labels, routing_vector=routing_vector, **kwargs))
         x = self.cv3(x, task_labels, routing_vector=routing_vector, **kwargs)
+        x = self.cv4(x, task_labels, routing_vector=routing_vector, **kwargs)
+        x = self.cv5(x, task_labels, routing_vector=routing_vector, **kwargs)
+
         # x = torch.relu(
         #     self.cv2(x, task_labels, routing_vector=routing_vector, **kwargs))
         # x = torch.relu(
         #     self.cv3(x, task_labels, routing_vector=routing_vector, **kwargs))
         # x = self.cv4(x, task_labels, routing_vector=routing_vector, **kwargs)
-        # x = self.mx(x)
+        x = self.mx(x)
         # x = torch.flatten(x, 1)
-
         return x
 
     def forward_single_task(self, x, task_labels, tau=None, **kwargs):
@@ -1716,7 +1752,7 @@ def train(train_stream, test_stream, theta=1, train_epochs=1,
     # optimizer = SGD(complete_model.parameters(), lr=0.1)
 
     eval_plugin = EvaluationPlugin(
-        accuracy_metrics(minibatch=False, epoch=False, experience=True,
+        accuracy_metrics(minibatch=False, epoch=True, experience=True,
                          stream=True),
         bwt_metrics(experience=True, stream=True),
         loggers=[
@@ -1800,10 +1836,10 @@ if __name__ == '__main__':
         train_dataset=cifar_train,
         test_dataset=cifar_test,
         n_experiences=5,
-        shuffle=True,
+        shuffle=False,
         task_labels=True,
-        class_ids_from_zero_in_each_exp=True,
-        class_ids_from_zero_from_first_exp=False,
+        class_ids_from_zero_in_each_exp=False,
+        class_ids_from_zero_from_first_exp=True,
         train_transform=_default_cifar10_train_transform,
         eval_transform=_default_cifar10_eval_transform)
 
@@ -1814,7 +1850,7 @@ if __name__ == '__main__':
     test_tasks = cifar10_test_stream
 
     model = train(train_epochs=1,
-                  fine_tune_epochs=1,
+                  fine_tune_epochs=10,
                   train_stream=train_tasks,
                   test_stream=test_tasks)
 
