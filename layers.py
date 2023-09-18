@@ -1032,6 +1032,7 @@ class BlockRoutingLayer(DynamicModule):
                  input_channels: int,
                  output_channels: int,
                  project_dim = None,
+                 get_average_features = False,
                  # out_project_dim = None,
                  **kwargs):
 
@@ -1052,15 +1053,18 @@ class BlockRoutingLayer(DynamicModule):
             i = str(i)
             self.blocks[i] = b
 
-            if project_dim is not None and project_dim > 0:
+            if (project_dim is not None and project_dim > 0) or get_average_features:
                 l = nn.Sequential(nn.AdaptiveAvgPool2d(4),
-                                  nn.Flatten(1),
-                                  nn.ReLU(),
-                                  nn.Linear(output_channels * 16, project_dim))
+                                  nn.Flatten(1))
+                
+                if project_dim is not None and project_dim > 0:
+                    l.append(nn.ReLU())
+                    l.append(nn.Linear(output_channels * 16, project_dim))
+                    bs = project_dim
+                else:
+                    bs = output_channels * 4
 
-            # else:
-            #     l = nn.Sequential(nn.AdaptiveAvgPool2d(2),
-            #                       nn.Flatten(1))
+                # l.append(nn.BatchNorm1d(bs))
 
                 self.projectors[i] = l
 
@@ -1069,26 +1073,48 @@ class BlockRoutingLayer(DynamicModule):
         for k in keys:
             delattr(self, k)
 
+    def activate_blocks(self, block_ids):
+        block_id = list(map(str, block_ids))
+        for k in self.blocks.keys():
+            flag = k in block_id
+
+            for p in self.blocks[k].parameters():
+                p.requires_grad_(flag)
+
+            if k in self.projectors:
+                for p in self.projectors[k].parameters():
+                    p.requires_grad_(flag)
+
+    def freeze_blocks(self):
+        for p in self.blocks.parameters():
+            p.requires_grad_(False)
+
+        for p in self.projectors.parameters():
+            p.requires_grad_(False)
+
+    def activate_block(self, block_ids):
+        block_id = str(block_ids)
+
+        for p in self.blocks[block_id].parameters():
+            p.requires_grad_(True)
+
+    def freeze_block(self, block_ids, freeze=True):
+        block_id = str(block_ids)
+
+        freeze = not freeze
+        for p in self.blocks[block_id].parameters():
+            p.requires_grad_(freeze)
+
+        if block_id in self.projectors:
+            for p in self.projectors[block_id].parameters():
+                p.requires_grad_(freeze)
+
     def forward(self, x, block_id, last_index_cache=None, **kwargs):
         if isinstance(block_id, (list, tuple)):
             ret = []
             ret_l = []
-            cache = dict()
 
             for _x, _bid in zip(x, block_id):
-                # l = None
-                # if _bid in cache:
-                #     f, l = cache[_bid]
-                # else:
-                #     f = self.blocks[str(_bid)](_x).relu()
-                #     if len(self.projectors) > 0:
-                #         l = self.projectors[str(_bid)](f)
-                # if l is not None:
-                #     ret_l.append(l)
-                # ret.append(f)
-                #
-                # cache[_bid] = (f, l)
-
                 f = self.blocks[str(_bid)](_x).relu()
                 if len(self.projectors) > 0:
                     l = self.projectors[str(_bid)](f)

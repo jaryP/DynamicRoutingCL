@@ -80,6 +80,28 @@ def calculate_similarity(x, y, distance: str = None, sigma=1):
     return similarity
 
 
+class CosineLinearLayer(nn.Linear):
+    def __init__(self, in_features: int):
+        super().__init__(in_features, out_features=1, bias=False)
+
+    def forward(self, input: Tensor) -> Tensor:
+        return torch.cosine_similarity(input[:, None], self.weight[None, :], -1)
+
+
+class ConcatLinearLayer(nn.Module):
+    def __init__(self, input_dim, embedding_dim: int):
+        super().__init__()
+        self.weight = nn.Parameter(torch.empty((1, embedding_dim)))
+        self.linear = nn.Linear(input_dim + embedding_dim, 1)
+
+        nn.init.normal_(self.weight)
+
+    def forward(self, input: Tensor) -> Tensor:
+        e = torch.cat((input, self.weight.expand(len(input), -1)), -1)
+        return self.linear(e)
+        return torch.cosine_similarity(input[:, None], self.weight[None, :],
+                                       -1)
+
 class LogitsDataset:
     def __init__(self, base_datasets, logits, features=None, classes=None):
         self.base_dataset = base_datasets
@@ -171,7 +193,7 @@ class CentroidsMatching(SupervisedPlugin):
                         logits.append(l)
 
                     logits = torch.cat(logits, 0)
-                    d.mb_logits = logits
+                    d.mb_features = logits
 
             strategy.model.train()
 
@@ -901,10 +923,22 @@ class Trainer(SupervisedTemplate):
                  evaluator: EvaluationPlugin = default_evaluator, eval_every=-1,
                  ):
 
+        self.double_sampling = False
         self.tasks_nclasses = dict()
+
+        self.cl_w = 0
+
+        # Past task loss weight
         self.alpha = 1
-        self.gamma = 1
+        self.past_margin = 0.2
+
+        # Past task features weight
         self.delta = 1
+
+        # Past task logits weight
+        self.gamma = 1
+        self.logit_regularization = 'mse'
+        self.tau = 1
 
         self.memory_size = 1000
         rp = CentroidsMatching()
@@ -915,11 +949,12 @@ class Trainer(SupervisedTemplate):
             self.batch_size_mem = batch_size_mem
 
         self.is_finetuning = False
-        self.mb_future_logits = None
+        self.mb_future_features = None
         self.ot_logits = None
 
         self.past_dataset = {}
         self.current_dataset = {}
+        self.past_centroids = {}
 
         self.batch_features = None
         self.replay_loader = None
@@ -954,49 +989,29 @@ class Trainer(SupervisedTemplate):
             evaluator=evaluator, eval_every=eval_every)
 
     def _after_forward(self, **kwargs):
-        self.mb_output, self.mb_logits, self.mb_output_future,  self.mb_future_logits = self.mb_output
+        self.mb_output, self.mb_features, self.mb_future_logits, self.mb_future_features = self.mb_output
         super()._after_forward(**kwargs)
 
     def _after_eval_forward(self, **kwargs):
-        self.mb_output, self.mb_logits, self.mb_output_future,  self.mb_future_logits = self.mb_output
+        self.mb_output, self.mb_features, self.mb_future_logits, self.mb_future_features = self.mb_output
         super()._after_forward(**kwargs)
 
     def _after_training_iteration(self, **kwargs):
         self.ot_logits = None
         super()._after_training_iteration(**kwargs)
 
-    # def training_epoch(self, **kwargs):
-    #     for self.mbatch in self.dataloader:
-    #         if self._stop_training:
-    #             break
-    #
-    #         self._unpack_minibatch()
-    #         self._before_training_iteration(**kwargs)
-    #
-    #         self.optimizer.zero_grad()
-    #         self.loss = self._make_empty_loss()
-    #
-    #         # Forward
-    #         self._before_forward(**kwargs)
-    #         self.mb_output, self.logits, self.mb_future_logits = self.forward()
-    #         self._after_forward(**kwargs)
-    #
-    #         # Loss & Backward
-    #         self.loss += self.criterion()
-    #
-    #         self._before_backward(**kwargs)
-    #         self.backward()
-    #         self._after_backward(**kwargs)
-    #
-    #         # Optimization step
-    #         self._before_update(**kwargs)
-    #         self.optimizer_step()
-    #         self._after_update(**kwargs)
-    #
-    #         self._after_training_iteration(**kwargs)
-
     def _after_training_exp(self, **kwargs):
         self._after_training_exp_f(**kwargs)
+
+        # centroids = self.model.centroids
+        # paths = self.model.paths_per_class
+        #
+        # for _, v in paths.values():
+        #     v = str(v)
+        #     if v not in self.past_centroids:
+        #         c = deepcopy(centroids[str(v)].data)
+        #         self.past_centroids[str(v)] = c
+
         super()._after_training_exp(**kwargs)
 
         # tid = self.experience.current_experience
@@ -1155,6 +1170,44 @@ class Trainer(SupervisedTemplate):
         # #
         # # self.past_dataset[tid] = ld
 
+    def sample_past_batch(self, batch_size):
+        if len(self.past_dataset) == 0:
+            return None
+
+        classes = (set(self.experience.classes_seen_so_far) -
+                   set(self.experience.classes_in_this_experience))
+
+        if len(classes) == 0:
+            return None
+
+        samples_per_task = batch_size // len(classes)
+        rest = batch_size % len(classes)
+
+        if rest > 0:
+            to_add = np.random.choice(list(classes))
+        else:
+            to_add = -1
+
+        x, y, t = [], [], []
+
+        for c in classes:
+            d = self.past_dataset[c]
+
+            if c == to_add:
+                bs = samples_per_task + rest
+            else:
+                bs = samples_per_task
+
+            ot_x, ot_y, ot_tid = next(iter(DataLoader(d,
+                                                      batch_size=bs,
+                                                      shuffle=True)))
+
+            x.append(ot_x)
+            y.append(ot_y)
+            t.append(ot_tid)
+
+        return torch.cat(x, 0), torch.cat(y, 0), torch.cat(t, 0)
+
     def _no_logits_before_forward(self, **kwargs):
 
         super()._before_forward(**kwargs)
@@ -1192,6 +1245,7 @@ class Trainer(SupervisedTemplate):
             self.mbatch[1] = torch.cat((self.mbatch[1], ot_y.to(self.device)))
             self.mbatch[2] = torch.cat((self.mbatch[2], ot_tid.to(self.device)))
 
+    @torch.no_grad()
     def _no_logits_after_training_exp(self, **kwargs):
 
         samples_to_save = self.memory_size // len(
@@ -1217,6 +1271,70 @@ class Trainer(SupervisedTemplate):
         if self.experience.current_experience > 0:
             self.past_model = deepcopy(self.model)
             self.past_model.eval()
+
+        return
+
+        all_logits = []
+        features = []
+        ys = []
+
+        indexes = defaultdict(list)
+        classes_count = defaultdict(int)
+        features = []
+
+        with torch.no_grad():
+            for i, (x, y, t) in enumerate(DataLoader(dataset, batch_size=32)):
+                x = x.to(device)
+
+                ys.append(y)
+                y = y.to(device)
+
+                f = self.model(x)[1]
+
+                features.append(f[range(len(f)), y].cpu())
+
+            ys = torch.cat(ys, 0)
+            features = torch.cat(features, 0)
+
+            ys = np.asarray(ys.numpy())
+            features = np.asarray(features.numpy())
+
+            classes_count = collections.Counter(ys)
+            tot = sum(classes_count.values())
+            classes_count = {k: v / tot for k, v in classes_count.most_common()}
+
+            for y in np.unique(ys):
+                mask = ys == y
+                f = features[mask]
+                indexes = np.argwhere(mask).reshape(-1)
+
+                km = KMeans(n_clusters=4).fit(f)
+                # km = AffinityPropagation().fit(f)
+                centroids = km.cluster_centers_
+                centroids = torch.tensor(centroids)
+
+                f = torch.tensor(f)
+                distances = calculate_distance(f, centroids)
+                closest_one = distances.argmin(-1).numpy()
+
+                unique_centroids = np.unique(closest_one)
+                sample_per_centroid = int(samples_to_save * classes_count[y]) // len(unique_centroids)
+                sample_per_centroid = samples_to_save // len(unique_centroids)
+
+                selected_indexes = []
+
+                for i in unique_centroids:
+                    mask = closest_one == i
+                    _indexes = indexes[mask]
+
+                    selected = np.random.choice(_indexes,
+                                                min(sample_per_centroid,
+                                                    len(_indexes)),
+                                                False)
+
+                    selected_indexes.extend(selected.tolist())
+
+                self.past_dataset[y] = dataset.train().subset(selected_indexes)
 
     def _logits_before_forward(self, **kwargs):
 
@@ -1299,7 +1417,7 @@ class Trainer(SupervisedTemplate):
                                       batch_size=self.eval_mb_size):
                 x = x.to(self.device)
 
-                logits, _, _ = self.model(x)
+                logits = self.model(x)[0]
                 all_logits.append(logits)
 
             all_logits = torch.cat(all_logits, 0).cpu()
@@ -1310,7 +1428,6 @@ class Trainer(SupervisedTemplate):
 
     def _before_forward(self, **kwargs):
         super()._before_forward(**kwargs)
-
         self._before_forward_f(**kwargs)
 
     @torch.no_grad()
@@ -1325,89 +1442,175 @@ class Trainer(SupervisedTemplate):
                 all_logits = []
                 for x, y, _, l in DataLoader(d,
                                              batch_size=self.train_mb_size):
-                    _l, _, _ = self.model(x.to(self.device))
+                    _l = self.model(x.to(self.device))[0]
                     _l = _l.cpu()
                     l = torch.cat((l, _l[:, l.shape[-1]:]), -1)
                     all_logits.append(l)
 
                 all_logits = torch.cat(all_logits, 0)
-                d.mb_logits = all_logits
+                d.logits = all_logits
                 self.past_dataset[k] = d
-        else:
-            if self.experience.current_experience > 0:
-                self.past_model = deepcopy(self.model)
-                self.past_model.eval()
+        # else:
+        #     if self.experience.current_experience > 0:
+        #         self.past_model = deepcopy(self.model)
+        #         self.past_model.eval()
 
         super()._before_training_exp(**kwargs)
 
+        if self.experience.current_experience > 0 and not self._use_logits:
+            self.past_model = deepcopy(self.model)
+            self.past_model.eval()
+
     def criterion(self):
+        if not self.is_training:
+            if isinstance(self.model, MoELogits):
+                loss_val = nn.functional.cross_entropy(self.mb_output, self.mb_y)
+            else:
+                log_p_y = torch.log_softmax(self.mb_output, dim=1)
+                loss_val = -log_p_y.gather(1, self.mb_y.unsqueeze(-1)).squeeze(
+                    -1).mean()
 
-        if self.mb_output_future is not None:
-            # pred, future_pred = torch.split(self.mb_output, (len(self.model.paths_per_class), self.mb_future_logits.shape[1]), 1)
+            return loss_val
 
-            pred, future_pred = self.mb_output, self.mb_output_future
-            mx = future_pred.max(-1).values
-            mx_current_classes = pred[range(len(pred)), self.mb_y]
+        past_reg = 0
+        future_reg = 0
 
-            # margin = torch.zeros_like(mx).uniform_(0.2, 0.5)
-            # future_loss = nn.functional.mse_loss(mx,
-            #                                      mx_current_classes - margin)
+        pred = self.mb_output
 
-            future_loss = torch.maximum(torch.zeros_like(mx), mx - mx_current_classes + 0.3).mean()
-            future_loss = future_loss * 0.5
+        if self.mb_future_logits is not None:
+            pred = torch.cat((self.mb_output, self.mb_future_logits), 1)
+
+        if len(self.past_dataset) == 0:
+            if isinstance(self.model, MoELogits):
+                loss_val = nn.functional.cross_entropy(pred, self.mb_y)
+            else:
+                log_p_y = torch.log_softmax(pred, dim=1)
+                loss_val = -log_p_y.gather(1, self.mb_y.unsqueeze(-1)).squeeze(-1).mean()
         else:
-            pred = self.mb_output
-            future_loss = 0
-
-        if len(self.past_dataset) == 0 or self.alpha == 1:
-            log_p_y = torch.log_softmax(pred, dim=1)
-            loss_val = -log_p_y.gather(1, self.mb_y.unsqueeze(-1)).squeeze(-1)
-        else:
-            pred = torch.log_softmax(pred, 1)
             s = len(pred) // 2
             pred1, pred2 = torch.split(pred, s, 0)
             y1, y2 = torch.split(self.mb_y, s, 0)
 
-            loss1 = -pred1.gather(1, y1.unsqueeze(-1)).squeeze(-1)
+            tid = self.experience.current_experience
+            # if tid > 0:
+            y1 = y1 - min(self.experience.classes_in_this_experience) # min(classes_in_this_experience)
 
-            loss2 = -pred2.gather(1, y2.unsqueeze(-1)).squeeze(-1)
+            neg_pred1 = pred1[:, :len(self.experience.previous_classes)]
+            pred1 = pred1[:, len(self.experience.previous_classes):]
+
+            mx = neg_pred1.max(-1).values
+            mx_current_classes = pred1[range(len(pred1)), y1]
+            past_reg = torch.maximum(torch.zeros_like(mx), mx - mx_current_classes + self.past_margin).mean()
+            past_reg = past_reg * 1
+
+            if isinstance(self.model, MoELogits):
+                loss1 = nn.functional.cross_entropy(pred1, y1)
+                loss2 = nn.functional.cross_entropy(pred2, y2)
+            else:
+                pred1 = torch.log_softmax(pred1, 1)
+                pred2 = torch.log_softmax(pred2, 1)
+                loss1 = -pred1.gather(1, y1.unsqueeze(-1)).squeeze(-1).mean()
+                loss2 = -pred2.gather(1, y2.unsqueeze(-1)).squeeze(-1).mean()
 
             loss_val = loss1 + self.alpha * loss2
 
-        loss = loss_val.mean() + future_loss
+        loss = loss_val + past_reg + future_reg
 
         if self.is_training:
             if self.past_model is not None:
                 bs = len(self.mb_output) // 2
 
+                if self.double_sampling:
+                    x, y, _ = self.sample_past_batch(bs)
+                    x, y = x.to(self.device), y.to(self.device)
+                    curr_logits, curr_features = self.model(x)[:2]
+                else:
+                    x, y = self.mb_x[bs:], self.mb_y[bs:]
+                    curr_logits = self.mb_output[bs:]
+                    curr_features = self.mb_features[bs:]
+
+                centroids = self.model.centroids
+                paths = self.model.paths_per_class
+
+                # centroids_losses = 0
+                #
+                # for k, c in self.past_centroids.items():
+                #     # sim = torch.cosine_similarity(centroids[k], c, 0)
+                #     # sim = nn.functional.mse_loss(centroids[k], c, 0)
+                #     centroids_losses += 1 - torch.cosine_similarity(centroids[k], c, 0)
+                #     # print(k, sim, torch.cosine_similarity(centroids[k], c, 0))
+                #
+                # centroids_losses = centroids_losses / len(self.past_centroids)
+                # self.loss += centroids_losses * self.cl_w
+
+                # bs = len(self.mb_output) // 2
+
                 with torch.no_grad():
-                    past_pred, past_logits, _, _ = self.past_model(self.mb_x[bs:])
+                    past_logits, past_features, _, _ = self.past_model(x)
+
+                classes = [self.tasks_nclasses[t.item()] for t in
+                           self.mb_task_id]
+
+                mask = torch.zeros(len(classes), past_logits.shape[1])
+                mask = torch.scatter(mask, 1, torch.tensor(classes), 1)
+                mask = mask.to(self.device)[bs:]
 
                 if self.gamma > 0:
-                    curr_pred = self.mb_output[bs:, :past_pred.shape[1]]
-                    mse = nn.functional.mse_loss(curr_pred, past_pred)
+                    # curr_pred = self.mb_output[bs:, :past_pred.shape[1]]
 
-                    # mse = nn.functional.kl_div(torch.log_softmax(curr_pred, -1),
-                    #                            torch.log_softmax(past_pred, -1),
-                    #                            log_target=True)
+                    # curr_logits = nn.functional.normalize(curr_logits, 2, -1)
+                    # past_logits = nn.functional.normalize(past_logits, 2, -1)
 
-                    loss += mse * self.gamma
+                    # lr = nn.functional.mse_loss(curr_logits, past_logits, reduction='mean')
+
+                    # # mse = nn.functional.mse_loss(curr_pred, past_pred)
+                    # mse = 1 - nn.functional.cosine_similarity(curr_pred, past_logits, -1).mean()
+
+                    # mse = mse * mask
+                    # mse = mse.sum(-1) / mask.sum(-1)
+                    # lr = mse.mean()
+                    if self.logit_regularization == 'kl':
+                        curr_logits = curr_logits * mask
+                        past_logits = past_logits * mask
+
+                        lr = nn.functional.kl_div(torch.log_softmax(curr_logits / self.tau, -1),
+                                                   torch.log_softmax(past_logits / self.tau, -1),
+                                                   log_target=True)
+                    elif self.logit_regularization == 'mse':
+                        lr = nn.functional.mse_loss(curr_logits, past_logits)
+                    else:
+                        assert False
+
+                    loss += lr * self.gamma
 
                 if self.delta > 0:
-                    classes = [self.tasks_nclasses[t.item()] for t in
-                               self.mb_task_id]
+                    # classes = [self.tasks_nclasses[t.item()] for t in
+                    #            self.mb_task_id]
+                    #
+                    # mask = torch.zeros(len(classes), past_pred.shape[1])
+                    # mask = torch.scatter(mask, 1, torch.tensor(classes), 1)
+                    # mask = mask.to(self.device)[bs:]
 
-                    mask = torch.zeros(len(classes), past_pred.shape[1])
-                    mask = torch.scatter(mask, 1, torch.tensor(classes), 1)
-                    mask = mask.to(self.device)[bs:]
+                    # logits = self.mb_features[bs:]
+                    # dist = nn.functional.mse_loss(logits, past_features,
+                    #                               reduction='mean')
+                    # dist = 1 - nn.functional.cosine_similarity(logits, past_features, -1)
 
-                    logits = self.mb_logits[bs:]
-                    dist = nn.functional.mse_loss(logits, past_logits,
-                                                  reduction='none').mean(-1)
-                    dist = dist * mask
-                    dist = dist.sum(-1) / mask.sum(-1, keepdim=True)
-                    dist = dist.mean()
+                    # logits = self.mb_features[bs:]
+                    # dist = nn.functional.mse_loss(logits, past_features,
+                    #                               reduction='none').mean(-1)
+                    # dist = dist * mask
+                    # dist = dist.sum(-1) / mask.sum(-1, keepdim=True)
+                    # dist = dist.mean()
 
+                    # y = self.mb_y[bs:]
+                    # logits = self.mb_features[bs:]
+                    curr_features = curr_features[range(len(curr_features)), y]
+                    past_features = past_features[range(len(curr_features)), y]
+
+                    # dist = nn.functional.mse_loss(curr_features, past_features)
+
+                    dist = (1 - nn.functional.cosine_similarity(curr_features, past_features, -1)).mean()
                     # dist = nn.functional.cosine_similarity(logits, past_logits, -1)
                     # dist = 1 - dist
                     # dist = dist * mask
@@ -1439,37 +1642,43 @@ class Trainer(SupervisedTemplate):
             elif self.ot_logits is not None:
                 bs = len(self.mb_output) // 2
 
-                past_pred = self.ot_logits
+                past_logits = self.ot_logits
 
-                curr_pred = self.mb_output[bs:, :past_pred.shape[1]]
-                mse = nn.functional.mse_loss(curr_pred, past_pred)
-                loss += mse * self.gamma
+                if self.gamma > 0:
+                    curr_logits = self.mb_output[bs:]
+
+                    lr = nn.functional.mse_loss(curr_logits, past_logits, reduction='mean')
+
+                    loss += lr * self.gamma
 
         return loss
 
 
-class CustomBlockModel(MultiTaskModule):
-    def __init__(self):
+class MoECentroids(MultiTaskModule):
+    def __init__(self, cumulative=False):
         super().__init__()
 
         self.forced_future = 0
         self.current_features = None
         self.centroids = None
         self.use_future = True
+        self.cumulative = cumulative
 
         self.distance = 'cosine'
         self.adapt = True
 
         self.layers = nn.ModuleList()
 
-        self.layers.append(BlockRoutingLayer(3, 32, project_dim=None))
-        self.layers.append(BlockRoutingLayer(32, 64, project_dim=None))
-        self.layers.append(BlockRoutingLayer(64, 128, project_dim=64))
+        self.layers.append(BlockRoutingLayer(3, 32, project_dim=None, get_average_features=True))
+        self.layers.append(BlockRoutingLayer(32, 64, project_dim=None, get_average_features=True))
+        self.layers.append(BlockRoutingLayer(64, 128, project_dim=None, get_average_features=True))
 
         self.mx = nn.Sequential(nn.ReLU())
 
-        self.in_features = 512 * 3
-        self.in_features = 128 * 4 + 32 * 4 + 63 * 4
+        if cumulative:
+            self.in_features = 32 * 4 + 64 * 4 + 128 * 4
+        else:
+            self.in_features = 128 * 16
 
         self.classifiers = nn.ParameterDict()
 
@@ -1481,7 +1690,7 @@ class CustomBlockModel(MultiTaskModule):
 
         self.centroids = nn.ParameterDict()
 
-        orth = torch.randn(100, 64) * 0.1
+        orth = torch.randn(100, self.in_features) * 0.01
         # svd = torch.linalg.svd(centroids)
         # orth = svd[0] @ svd[2]
 
@@ -1491,11 +1700,14 @@ class CustomBlockModel(MultiTaskModule):
                 ln = len(paths)
                 v = (b, ln)
                 self.centroids[str(ln)] = nn.Parameter(orth[ln],
-                                                       requires_grad=True)
+                                                       requires_grad=False)
                 paths.append(v)
 
         self.available_paths = paths
         self.paths_per_class = {}
+
+        # for l in self.layers:
+        #     l.freeze_blocks()
 
     def eval_adaptation(self, experience):
         if len(experience.classes_seen_so_far) > len(self.paths_per_class):
@@ -1518,6 +1730,7 @@ class CustomBlockModel(MultiTaskModule):
 
         for p, v in self.paths_per_class.values():
             self.centroids[str(v)].requires_grad_(False)
+            # print(self.centroids[str(v)])
 
         for c, p in zip(experience.classes_in_this_experience, paths):
             self.available_paths.remove(p)
@@ -1526,11 +1739,15 @@ class CustomBlockModel(MultiTaskModule):
             _, v = p
             self.centroids[str(v)].requires_grad_(True)
 
+        for b, l in zip(zip(*[p[0] for p in paths]), self.layers):
+            l.activate_blocks(b)
+
     def forward(self,
                 x: torch.Tensor,
                 task_labels: torch.Tensor = None,
                 **kwargs) \
-            -> Tuple[Tensor, Union[Tensor, Any], Optional[None], Optional[None]]:
+            -> Tuple[
+                Tensor, Union[Tensor, Any], Optional[None], Optional[None]]:
 
         if task_labels is not None:
             if not isinstance(task_labels, int):
@@ -1574,17 +1791,18 @@ class CustomBlockModel(MultiTaskModule):
                                      for _, v in all_paths], 0)
 
         if self.distance == 'euclidean':
-            preds = 1 / torch.pow(logits - centroids, 2).sum(2).sqrt()
+            preds = - torch.pow(logits - centroids, 2).sum(2).sqrt()
         else:
             preds = torch.cosine_similarity(logits, centroids, -1)
 
         if random_logits is not None:
             if self.distance == 'euclidean':
-                random_preds = 1 / torch.pow(random_logits - random_centroids, 2).sum(
+                random_preds = - torch.pow(random_logits - random_centroids, 2).sum(
                     2).sqrt()
             else:
-                random_preds = torch.cosine_similarity(random_logits, random_centroids,
-                                                -1)
+                random_preds = torch.cosine_similarity(random_logits,
+                                                       random_centroids,
+                                                       -1)
 
         return preds, logits, random_preds, random_logits
 
@@ -1669,11 +1887,444 @@ class CustomBlockModel(MultiTaskModule):
             # _x = _x.relu()
             feats.append(f)
 
-        _, logits = self.layers[-1](_x, next(paths_iterable))
+        _, f = self.layers[-1](_x, next(paths_iterable))
+        feats.append(f)
+
+        if self.cumulative:
+            feats = [torch.cat(l, -1 )for l in list(zip(*feats))]
+            logits = torch.stack(feats, 1)
+        else:
+            logits = torch.stack(f, 1)
+
+        return logits
+
+
+class MoELogits(MultiTaskModule):
+    def __init__(self, cumulative=False, freeze=False, freeze_future=True):
+        super().__init__()
+
+        self.forced_future = 0
+        self.current_features = None
+        self.centroids = None
+        self.use_future = True
+        self.cumulative = cumulative
+
+        self.freeze_future = freeze_future
+        self.freeze = freeze
+
+        self.distance = 'cosine'
+        self.adapt = True
+
+        self.layers = nn.ModuleList()
+
+        self.layers.append(BlockRoutingLayer(3, 32, project_dim=None, get_average_features=True))
+        self.layers.append(BlockRoutingLayer(32, 64, project_dim=None, get_average_features=True))
+        self.layers.append(BlockRoutingLayer(64, 128, project_dim=128, get_average_features=True))
+
+        self.mx = nn.Sequential(nn.ReLU())
+
+        if cumulative:
+            self.in_features = 32 * 4 + 64 * 4 + 128 * 4
+        else:
+            self.in_features = 128
+
+        self.classifiers = nn.ParameterDict()
+
+        self.gates = nn.ModuleDict()
+        self.translate = nn.ModuleDict()
+
+        layers_blocks = [len(l.blocks) for l in self.layers]
+        paths = []
+
+        self.centroids = nn.ParameterDict()
+
+        while len(paths) < 100:
+            b = [np.random.randint(0, l) for l in layers_blocks]
+            if b not in paths:
+                ln = len(paths)
+                v = (b, ln)
+                self.centroids[str(ln)] = nn.Sequential(nn.Flatten(1),
+                                                        # nn.ReLU(),
+                                                        # CosineLinearLayer(self.in_features),
+                                                        # ConcatLinearLayer(self.in_features, 100)
+                                                        nn.Linear(self.in_features, 1),
+                                                        # nn.Sigmoid()
+                                                        )
+                paths.append(v)
+
+        self.available_paths = paths
+        self.paths_per_class = {}
+
+        if freeze or freeze_future:
+            for l in self.layers:
+                l.freeze_blocks()
+
+            for p in self.centroids.parameters():
+                p.requires_grad_(False)
+
+    def eval_adaptation(self, experience):
+        if len(experience.classes_seen_so_far) > len(self.paths_per_class):
+            self.forced_future = len(experience.classes_seen_so_far) - len(
+                self.paths_per_class)
+        else:
+            self.forced_future = 0
+
+    def train_adaptation(self, experience):
+        if not self.adapt:
+            return
+        self.forced_future = 0
+
+        curr_classes = experience.classes_in_this_experience
+
+        selected_paths = np.random.choice(np.arange(len(self.available_paths)),
+                                          len(curr_classes),
+                                          replace=False)
+        paths = [self.available_paths[i] for i in selected_paths]
+
+        if self.freeze:
+            for pt, v in self.paths_per_class.values():
+
+                # for p in self.centroids[str(v)].parameters():
+                #     p.requires_grad_(False)
+
+                for b, l in zip(pt, self.layers):
+                    l.freeze_block(b)
+
+            # print(self.centroids[str(v)])
+
+        # for b, l in zip(zip(*[p[0] for p in paths]), self.layers):
+        #     l.activate_blocks(b)
+
+        for c, p in zip(experience.classes_in_this_experience, paths):
+            self.available_paths.remove(p)
+            self.paths_per_class[c] = p
+
+            if self.freeze or self.freeze_future:
+                for b, l in zip(p[0], self.layers):
+                    l.freeze_block(b, False)
+
+                for p in self.centroids[str(p[1])].parameters():
+                    p.requires_grad_(True)
+
+    def forward(self,
+                x: torch.Tensor,
+                task_labels: torch.Tensor = None,
+                **kwargs) \
+            -> Tuple[
+                Tensor, Union[Tensor, Any], Optional[None], Optional[None]]:
+
+        if task_labels is not None:
+            if not isinstance(task_labels, int):
+                task_labels = torch.unique(task_labels)
+                # assert len(task_labels) == 1
+                task_labels = task_labels[0]
+
+        base_paths = list(self.paths_per_class.values())
+        random_paths = []
+
+        if self.training and self.use_future:
+            sampled_paths = np.random.choice(
+                np.arange(len(self.available_paths)),
+                5, replace=True)
+            random_paths = [self.available_paths[p] for p in sampled_paths]
+
+        if self.forced_future > 0:
+            sampled_paths = np.random.choice(
+                np.arange(len(self.available_paths)),
+                self.forced_future, replace=True)
+            base_paths += [self.available_paths[p] for p in sampled_paths]
+
+        all_paths = base_paths + random_paths
+        features = self.features(x, unassigned_path_to_use=all_paths)
+
+        logits = []
+        for i, (_,v) in enumerate(all_paths):
+            logits.append(self.centroids[str(v)](features[:, i]))
+
+        # logits = logits.
+        # logits = [self.centroids[str(v)](l) for l, (_, v) in zip(features, all_paths)]
+        logits = torch.cat(logits, 1)
+
+        random_features = None
+        random_logits = None
+
+        if len(base_paths) > 0:
+            if len(random_paths) > 0:
+                random_logits = logits[:, -len(random_paths):]
+                random_features = features[:, -len(random_paths):]
+
+            features = features[:, :len(base_paths)]
+            logits = logits[:, :len(base_paths)]
+
+        # else:
+        #     centroids = torch.stack([self.centroids[str(v)]
+        #                              for _, v in all_paths], 0)
+        #
+        # if self.distance == 'euclidean':
+        #     preds = - torch.pow(features - centroids, 2).sum(2).sqrt()
+        # else:
+        #     preds = torch.cosine_similarity(features, centroids, -1)
+        #
+        # if random_logits is not None:
+        #     if self.distance == 'euclidean':
+        #         random_preds = - torch.pow(random_logits - random_centroids, 2).sum(
+        #             2).sqrt()
+        #     else:
+        #         random_preds = torch.cosine_similarity(random_logits,
+        #                                                random_centroids,
+        #                                                -1)
+
+        return logits, features, random_logits, random_features
+
+    def features1(self, x, *,
+                  task_labels=None,
+                  unassigned_path_to_use=None, **kwargs):
+        # assert (task_labels is None) ^ (path_id is None)
+        if unassigned_path_to_use is not None:
+            if isinstance(unassigned_path_to_use, tuple):
+                unassigned_path_to_use = [unassigned_path_to_use]
+            # elif isinstance(non_assigned_paths, int):
+            #     non_assigned_paths = [non_assigned_paths]
+            elif (isinstance(unassigned_path_to_use, list)
+                  and isinstance(unassigned_path_to_use[0], int)):
+                pass
+            elif unassigned_path_to_use == 'all':
+                unassigned_path_to_use = self.available_paths
+
+            to_iter = unassigned_path_to_use
+        else:
+            to_iter = self.paths_per_class.values()
+
+        logits = []
+
+        for path in to_iter:
+            p, v = path
+            path = iter(p)
+            _x = x
+            current_path = 0
+            feats = []
+
+            for l in self.layers[:-1]:
+                _p = next(path)
+                _x, f = l(_x, _p, current_path)
+                _x = _x.relu()
+                # f = nn.functional.adaptive_avg_pool2d(_x, 2).flatten(1)
+                feats.append(f)
+
+                current_path = _p
+
+            _, _x = self.layers[-1](_x, next(path), current_path)
+            # _x = nn.functional.adaptive_avg_pool2d(_x, 2).flatten(1)
+
+            feats.append(_x.flatten(1))
+
+            if str(v) in self.translate:
+                # l = l + self.translate[str(v)](l)
+                _x = (_x * self.gates[str(v)](_x).sigmoid()
+                      + self.translate[str(v)](_x))
+
+            _x = torch.cat(feats, -1)
+
+            logits.append(_x)
+
+        return torch.stack(logits, 1)
+
+    def features(self, x, *,
+                 unassigned_path_to_use=None, **kwargs):
+
+        if unassigned_path_to_use is not None:
+            if isinstance(unassigned_path_to_use, tuple):
+                unassigned_path_to_use = [unassigned_path_to_use]
+            elif (isinstance(unassigned_path_to_use, list)
+                  and isinstance(unassigned_path_to_use[0], int)):
+                assert False
+            elif unassigned_path_to_use == 'all':
+                unassigned_path_to_use = self.available_paths
+
+            to_iter = unassigned_path_to_use
+        else:
+            to_iter = self.paths_per_class.values()
+
+        feats = []
+
+        paths = list(zip(*[p for p, _ in to_iter]))
+        paths_iterable = iter(paths)
+        _x = [x] * len(paths[0])
+
+        for l in self.layers[:-1]:
+            _p = next(paths_iterable)
+            _x, f = l(_x, _p)
+            # _x = _x.relu()
+            feats.append(f)
+
+        _, f = self.layers[-1](_x, next(paths_iterable))
+        feats.append(f)
+
+        if self.cumulative:
+            feats = [torch.cat(l, -1 )for l in list(zip(*feats))]
+            logits = torch.stack(feats, 1)
+        else:
+            logits = torch.stack(f, 1)
+
+        return logits
+
+
+class _MoELogits(MultiTaskModule):
+    def __init__(self):
+        super().__init__()
+
+        self.forced_future = 0
+        self.current_features = None
+        self.centroids = None
+        self.use_future = True
+
+        self.distance = 'cosine'
+        self.adapt = True
+
+        self.layers = nn.ModuleList()
+
+        self.layers.append(BlockRoutingLayer(3, 32, project_dim=32))
+        self.layers.append(BlockRoutingLayer(32, 64, project_dim=64))
+        self.layers.append(BlockRoutingLayer(64, 128, project_dim=128))
+
+        self.mx = nn.Sequential(nn.ReLU())
+
+        in_features = 128 + 32 + 64
+
+        self.classifiers = nn.ParameterDict()
+
+        self.gates = nn.ModuleDict()
+        self.translate = nn.ModuleDict()
+
+        layers_blocks = [len(l.blocks) for l in self.layers]
+        paths = []
+
+        self.centroids = nn.ModuleDict()
+
+        while len(paths) < 100:
+            b = [np.random.randint(0, l) for l in layers_blocks]
+            if b not in paths:
+                ln = len(paths)
+                v = (b, ln)
+                self.centroids[str(ln)] = nn.Sequential(nn.Flatten(1),
+                                                        nn.ReLU(),
+                                                        CosineLinearLayer(in_features))
+                paths.append(v)
+
+        self.available_paths = paths
+        self.paths_per_class = {}
+
+    def eval_adaptation(self, experience):
+        if len(experience.classes_seen_so_far) > len(self.paths_per_class):
+            self.forced_future = len(experience.classes_seen_so_far) - len(
+                self.paths_per_class)
+        else:
+            self.forced_future = 0
+
+    def train_adaptation(self, experience):
+        if not self.adapt:
+            return
+        self.forced_future = 0
+
+        curr_classes = experience.classes_in_this_experience
+
+        selected_paths = np.random.choice(np.arange(len(self.available_paths)),
+                                          len(curr_classes),
+                                          replace=False)
+        paths = [self.available_paths[i] for i in selected_paths]
+
+        # for p, v in self.paths_per_class.values():
+        #     self.centroids[str(v)].requires_grad_(False)
+
+        for c, p in zip(experience.classes_in_this_experience, paths):
+            self.available_paths.remove(p)
+            self.paths_per_class[c] = p
+
+            _, v = p
+            # self.centroids[str(v)].requires_grad_(True)
+
+    def forward(self,
+                x: torch.Tensor,
+                task_labels: torch.Tensor = None,
+                **kwargs) \
+            -> Tuple[
+                Tensor, Union[Tensor, Any], Optional[None], Optional[None]]:
+
+        if task_labels is not None:
+            if not isinstance(task_labels, int):
+                task_labels = torch.unique(task_labels)
+                # assert len(task_labels) == 1
+                task_labels = task_labels[0]
+
+        base_paths = list(self.paths_per_class.values())
+        random_paths = []
+
+        if self.training and self.use_future:
+            sampled_paths = np.random.choice(
+                np.arange(len(self.available_paths)),
+                5, replace=True)
+            random_paths = [self.available_paths[p] for p in sampled_paths]
+
+        if self.forced_future > 0:
+            sampled_paths = np.random.choice(
+                np.arange(len(self.available_paths)),
+                self.forced_future, replace=True)
+            base_paths += [self.available_paths[p] for p in sampled_paths]
+
+        all_paths = base_paths + random_paths
+        logits = self.features(x, unassigned_path_to_use=all_paths)
+
+        preds = [self.centroids[str(v)](l) for l, (_, v) in zip(logits, all_paths)]
+        preds = torch.cat(preds, -1)
+
+        logits = torch.stack(logits, 1).flatten(2)
+
+        random_logits = None
+        random_preds = None
+
+        if len(base_paths) > 0 and len(random_paths) > 0:
+            random_logits = logits[:, -len(random_paths):]
+            random_preds = preds[:, -len(random_paths):]
+            logits = logits[:, :len(base_paths)]
+            preds = preds[:, :len(base_paths)]
+
+        return preds, logits, random_preds, random_logits
+
+    def features(self, x, *,
+                 unassigned_path_to_use=None, **kwargs):
+
+        if unassigned_path_to_use is not None:
+            if isinstance(unassigned_path_to_use, tuple):
+                unassigned_path_to_use = [unassigned_path_to_use]
+            elif (isinstance(unassigned_path_to_use, list)
+                  and isinstance(unassigned_path_to_use[0], int)):
+                assert False
+            elif unassigned_path_to_use == 'all':
+                unassigned_path_to_use = self.available_paths
+
+            to_iter = unassigned_path_to_use
+        else:
+            to_iter = self.paths_per_class.values()
+
+        feats = []
+
+        paths = list(zip(*[p for p, _ in to_iter]))
+        paths_iterable = iter(paths)
+        _x = [x] * len(paths[0])
+
+        for l in self.layers[:-1]:
+            _p = next(paths_iterable)
+            _x, f = l(_x, _p)
+            # _x = _x.relu()
+            feats.append(f)
+
+        logits, _x = self.layers[-1](_x, next(paths_iterable))
         feats.append(_x)
 
-        # logits = [torch.cat(l, -1 )for l in list(zip(*feats))]
-        logits = torch.stack(logits, 1)
+        logits = [torch.cat(l, -1 )for l in list(zip(*feats))]
+
+        # logits = [nn.functional.adaptive_avg_pool2d(l, 4).flatten(1)
+        #           for l in logits]
 
         return logits
 
@@ -1698,7 +2349,9 @@ device = torch.device(device)
 
 def train(train_stream, test_stream, theta=1, train_epochs=1,
           fine_tune_epochs=1):
-    complete_model = CustomBlockModel()
+    # complete_model = MoECentroids()
+
+    complete_model = MoELogits()
 
     criterion = CrossEntropyLoss()
 
@@ -1722,22 +2375,22 @@ def train(train_stream, test_stream, theta=1, train_epochs=1,
                       eval_mb_size=32, evaluator=eval_plugin,
                       criterion=criterion, device=device,
                       train_epochs=train_epochs)
-
+    #
     # class Model(DynamicModule):
     #     def __init__(self, *args, **kwargs):
     #         super().__init__(*args, **kwargs)
     #         self.complete_model = nn.Sequential(
     #             nn.Conv2d(3, 32, 3),
     #             nn.ReLU(),
-    #             nn.Conv2d(32, 2064, 3),
+    #             nn.Conv2d(32, 64, 3),
     #             nn.ReLU(),
     #             nn.Conv2d(64, 128, 3),
     #             nn.ReLU(),
     #             nn.Conv2d(128, 256, 3),
     #             nn.ReLU(),
-    #             nn.AdaptiveAvgPool2d(2),
+    #             nn.AdaptiveAvgPool2d(4),
     #             nn.Flatten(),
-    #             nn.Linear(256 * 4, 10)
+    #             nn.Linear(256 * 16, 100)
     #         )
     #
     #         self.classifier = IncrementalClassifier(256 * 4,
@@ -1749,9 +2402,9 @@ def train(train_stream, test_stream, theta=1, train_epochs=1,
     #         return x
     #         # return self.classifier(x, task_labels=task_labels)
     #
-    # trainer = DER(mem_size=500, model=Model(), alpha=0.2, beta=0.5,
+    # trainer = DER(mem_size=200, model=Model(),
     #               criterion=criterion, optimizer=optimizer,
-    #               train_epochs=train_epochs, eval_every=1,
+    #               train_epochs=train_epochs, eval_every=5,
     #               train_mb_size=32, evaluator=eval_plugin,
     #               device=device)
 
