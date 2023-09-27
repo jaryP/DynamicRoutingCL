@@ -9,7 +9,7 @@ from avalanche.training.supervised.der import DER
 from sklearn.cluster import KMeans, AffinityPropagation
 from sklearn.manifold import TSNE
 from matplotlib import pyplot as plt
-import distinctipy
+# import distinctipy
 
 import collections
 import numpy as np
@@ -85,7 +85,9 @@ class CosineLinearLayer(nn.Linear):
         super().__init__(in_features, out_features=1, bias=False)
 
     def forward(self, input: Tensor) -> Tensor:
-        return torch.cosine_similarity(input[:, None], self.weight[None, :], -1)
+        return 1 / torch.norm(input[:, None] - self.weight[None, :], 2, -1)
+        cos = torch.cosine_similarity(input[:, None], self.weight[None, :], -1)
+        return cos
 
 
 class ConcatLinearLayer(nn.Module):
@@ -930,17 +932,19 @@ class Trainer(SupervisedTemplate):
 
         # Past task loss weight
         self.alpha = 1
-        self.past_margin = 0.2
+
+        self.past_task_reg = 1
+        self.past_margin = 1
 
         # Past task features weight
-        self.delta = 1
+        self.delta = 0
 
         # Past task logits weight
         self.gamma = 1
         self.logit_regularization = 'mse'
         self.tau = 1
 
-        self.memory_size = 1000
+        self.memory_size = 2500
         rp = CentroidsMatching()
 
         if batch_size_mem is None:
@@ -981,7 +985,7 @@ class Trainer(SupervisedTemplate):
             self._after_training_exp_f = self._logits_after_training_exp
 
         super().__init__(
-            model, optimizer, criterion=None,
+            model=model, optimizer=optimizer, criterion=None,
             train_mb_size=train_mb_size,
             train_epochs=train_epochs,
             eval_mb_size=eval_mb_size, device=device,
@@ -1474,7 +1478,7 @@ class Trainer(SupervisedTemplate):
 
         past_reg = 0
         future_reg = 0
-
+        
         pred = self.mb_output
 
         if self.mb_future_logits is not None:
@@ -1482,7 +1486,7 @@ class Trainer(SupervisedTemplate):
 
         if len(self.past_dataset) == 0:
             if isinstance(self.model, MoELogits):
-                loss_val = nn.functional.cross_entropy(pred, self.mb_y)
+                loss_val = nn.functional.cross_entropy(pred, self.mb_y, label_smoothing=0)
             else:
                 log_p_y = torch.log_softmax(pred, dim=1)
                 loss_val = -log_p_y.gather(1, self.mb_y.unsqueeze(-1)).squeeze(-1).mean()
@@ -1500,12 +1504,19 @@ class Trainer(SupervisedTemplate):
 
             mx = neg_pred1.max(-1).values
             mx_current_classes = pred1[range(len(pred1)), y1]
+
             past_reg = torch.maximum(torch.zeros_like(mx), mx - mx_current_classes + self.past_margin).mean()
-            past_reg = past_reg * 1
+            # past_dist = torch.maximum(torch.zeros_like(mx), mx - mx_current_classes + self.past_margin)
+            # past_reg = past_dist.sum() / torch.sum(past_dist > 0)
+
+            w = min(self.clock.train_exp_epochs / 5, 1)
+            w = 1
+
+            past_reg = past_reg * self.past_task_reg
 
             if isinstance(self.model, MoELogits):
-                loss1 = nn.functional.cross_entropy(pred1, y1)
-                loss2 = nn.functional.cross_entropy(pred2, y2)
+                loss1 = nn.functional.cross_entropy(pred1, y1, label_smoothing=0)
+                loss2 = nn.functional.cross_entropy(pred2, y2, label_smoothing=0)
             else:
                 pred1 = torch.log_softmax(pred1, 1)
                 pred2 = torch.log_softmax(pred2, 1)
@@ -1529,22 +1540,6 @@ class Trainer(SupervisedTemplate):
                     curr_logits = self.mb_output[bs:]
                     curr_features = self.mb_features[bs:]
 
-                centroids = self.model.centroids
-                paths = self.model.paths_per_class
-
-                # centroids_losses = 0
-                #
-                # for k, c in self.past_centroids.items():
-                #     # sim = torch.cosine_similarity(centroids[k], c, 0)
-                #     # sim = nn.functional.mse_loss(centroids[k], c, 0)
-                #     centroids_losses += 1 - torch.cosine_similarity(centroids[k], c, 0)
-                #     # print(k, sim, torch.cosine_similarity(centroids[k], c, 0))
-                #
-                # centroids_losses = centroids_losses / len(self.past_centroids)
-                # self.loss += centroids_losses * self.cl_w
-
-                # bs = len(self.mb_output) // 2
-
                 with torch.no_grad():
                     past_logits, past_features, _, _ = self.past_model(x)
 
@@ -1556,30 +1551,56 @@ class Trainer(SupervisedTemplate):
                 mask = mask.to(self.device)[bs:]
 
                 if self.gamma > 0:
-                    # curr_pred = self.mb_output[bs:, :past_pred.shape[1]]
+                    # self.internal_distillation
+                    if False:
+                        all_lr = 0
 
-                    # curr_logits = nn.functional.normalize(curr_logits, 2, -1)
-                    # past_logits = nn.functional.normalize(past_logits, 2, -1)
+                        csf = len(self.experience.previous_classes)
+                        for cc, pp in zip(self.model.internal_features[:csf],
+                                        self.past_model.internal_features[:csf]):
 
-                    # lr = nn.functional.mse_loss(curr_logits, past_logits, reduction='mean')
+                            for c, p in zip(cc, pp):
+                                c = torch.flatten(c, 1)[bs:]
+                                p = torch.flatten(p, 1)
 
-                    # # mse = nn.functional.mse_loss(curr_pred, past_pred)
-                    # mse = 1 - nn.functional.cosine_similarity(curr_pred, past_logits, -1).mean()
+                                lr = 1 - nn.functional.cosine_similarity(c, p, -1)
+                                all_lr += lr
 
-                    # mse = mse * mask
-                    # mse = mse.sum(-1) / mask.sum(-1)
-                    # lr = mse.mean()
-                    if self.logit_regularization == 'kl':
-                        curr_logits = curr_logits * mask
-                        past_logits = past_logits * mask
+                        lr = (all_lr / csf).mean()
 
-                        lr = nn.functional.kl_div(torch.log_softmax(curr_logits / self.tau, -1),
-                                                   torch.log_softmax(past_logits / self.tau, -1),
-                                                   log_target=True)
-                    elif self.logit_regularization == 'mse':
-                        lr = nn.functional.mse_loss(curr_logits, past_logits)
                     else:
-                        assert False
+                        # curr_pred = self.mb_output[bs:, :past_pred.shape[1]]
+
+                        # curr_logits = nn.functional.normalize(curr_logits, 2, -1)
+                        # past_logits = nn.functional.normalize(past_logits, 2, -1)
+
+                        # lr = nn.functional.mse_loss(curr_logits, past_logits, reduction='mean')
+
+                        # # mse = nn.functional.mse_loss(curr_pred, past_pred)
+                        # mse = 1 - nn.functional.cosine_similarity(curr_pred, past_logits, -1).mean()
+
+                        # mse = mse * mask
+                        # mse = mse.sum(-1) / mask.sum(-1)
+                        # lr = mse.mean()
+                        classes = len(self.experience.classes_in_this_experience)
+
+                        if self.logit_regularization == 'kl':
+                            # curr_logits = curr_logits * mask
+                            # past_logits = past_logits * mask
+
+                            curr_logits = torch.softmax(curr_logits / self.tau, -1)[:, :-classes]
+                            past_logits = torch.softmax(past_logits / self.tau, -1)[:, :-classes]
+
+                            lr = nn.functional.kl_div(curr_logits.log(),
+                                                       past_logits)
+
+                        elif self.logit_regularization == 'mse':
+                            lr = nn.functional.mse_loss(curr_logits, past_logits)
+                        elif self.logit_regularization == 'cosine':
+                            lr = 1 - nn.functional.cosine_similarity(curr_logits, past_logits, -1)
+                            lr = lr.mean()
+                        else:
+                            assert False
 
                     loss += lr * self.gamma
 
@@ -1605,17 +1626,21 @@ class Trainer(SupervisedTemplate):
 
                     # y = self.mb_y[bs:]
                     # logits = self.mb_features[bs:]
-                    curr_features = curr_features[range(len(curr_features)), y]
-                    past_features = past_features[range(len(curr_features)), y]
+                    # curr_features = curr_features[range(len(curr_features)), y]
+                    # past_features = past_features[range(len(curr_features)), y]
+                    classes = len(self.experience.classes_in_this_experience)
 
-                    # dist = nn.functional.mse_loss(curr_features, past_features)
+                    curr_features = curr_features[:, :-classes]
+                    past_features = past_features[:, :-classes]
 
-                    dist = (1 - nn.functional.cosine_similarity(curr_features, past_features, -1)).mean()
+                    # dist = nn.functional.mse_loss(curr_features, past_features, reduction='none').mean(-1)
+
+                    dist = 1 - nn.functional.cosine_similarity(curr_features, past_features, -1)
                     # dist = nn.functional.cosine_similarity(logits, past_logits, -1)
                     # dist = 1 - dist
                     # dist = dist * mask
-                    # dist = dist.sum(-1) / mask.sum(-1, keepdim=True)
-                    # dist = dist.mean()
+                    # dist = dist.sum(-1) / mask.sum(-1)
+                    dist = dist.sum(-1).mean()
 
                     # logits = logits[range(len(logits)), self.mb_y[bs:]]
                     #
@@ -1904,8 +1929,11 @@ class MoELogits(MultiTaskModule):
         super().__init__()
 
         self.forced_future = 0
+
+        self.internal_features = None
         self.current_features = None
         self.centroids = None
+
         self.use_future = True
         self.cumulative = cumulative
 
@@ -1917,9 +1945,9 @@ class MoELogits(MultiTaskModule):
 
         self.layers = nn.ModuleList()
 
-        self.layers.append(BlockRoutingLayer(3, 32, project_dim=None, get_average_features=True))
-        self.layers.append(BlockRoutingLayer(32, 64, project_dim=None, get_average_features=True))
-        self.layers.append(BlockRoutingLayer(64, 128, project_dim=128, get_average_features=True))
+        self.layers.append(BlockRoutingLayer(3, 32, project_dim=None, get_average_features=False))
+        self.layers.append(BlockRoutingLayer(32, 64, project_dim=None, get_average_features=False))
+        self.layers.append(BlockRoutingLayer(64, 128, project_dim=128, get_average_features=False))
 
         self.mx = nn.Sequential(nn.ReLU())
 
@@ -1936,7 +1964,8 @@ class MoELogits(MultiTaskModule):
         layers_blocks = [len(l.blocks) for l in self.layers]
         paths = []
 
-        self.centroids = nn.ParameterDict()
+        self.centroids = nn.ModuleDict()
+        self.centroids_scaler = nn.ParameterDict()
 
         while len(paths) < 100:
             b = [np.random.randint(0, l) for l in layers_blocks]
@@ -1947,7 +1976,7 @@ class MoELogits(MultiTaskModule):
                                                         # nn.ReLU(),
                                                         # CosineLinearLayer(self.in_features),
                                                         # ConcatLinearLayer(self.in_features, 100)
-                                                        nn.Linear(self.in_features, 1),
+                                                        nn.Sequential(nn.ReLU(), nn.Linear(self.in_features, 1)),
                                                         # nn.Sigmoid()
                                                         )
                 paths.append(v)
@@ -1984,11 +2013,13 @@ class MoELogits(MultiTaskModule):
         if self.freeze:
             for pt, v in self.paths_per_class.values():
 
-                # for p in self.centroids[str(v)].parameters():
-                #     p.requires_grad_(False)
+                for p in self.centroids[str(v)].parameters():
+                    p.requires_grad_(False)
 
                 for b, l in zip(pt, self.layers):
                     l.freeze_block(b)
+
+                # self.centroids_scaler[str(v)] = nn.Parameter(torch.tensor([1.0]))
 
             # print(self.centroids[str(v)])
 
@@ -2035,11 +2066,17 @@ class MoELogits(MultiTaskModule):
             base_paths += [self.available_paths[p] for p in sampled_paths]
 
         all_paths = base_paths + random_paths
-        features = self.features(x, unassigned_path_to_use=all_paths)
+        features, all_features = self.features(x, unassigned_path_to_use=all_paths)
+
+        # self.internal_features = list(zip(*all_features))
 
         logits = []
         for i, (_,v) in enumerate(all_paths):
-            logits.append(self.centroids[str(v)](features[:, i]))
+            l = self.centroids[str(v)](features[:, i])
+
+            if self.freeze and str(v) in self.centroids_scaler:
+                l = l / self.centroids_scaler[str(v)]
+            logits.append(l)
 
         # logits = logits.
         # logits = [self.centroids[str(v)](l) for l, (_, v) in zip(features, all_paths)]
@@ -2076,59 +2113,6 @@ class MoELogits(MultiTaskModule):
 
         return logits, features, random_logits, random_features
 
-    def features1(self, x, *,
-                  task_labels=None,
-                  unassigned_path_to_use=None, **kwargs):
-        # assert (task_labels is None) ^ (path_id is None)
-        if unassigned_path_to_use is not None:
-            if isinstance(unassigned_path_to_use, tuple):
-                unassigned_path_to_use = [unassigned_path_to_use]
-            # elif isinstance(non_assigned_paths, int):
-            #     non_assigned_paths = [non_assigned_paths]
-            elif (isinstance(unassigned_path_to_use, list)
-                  and isinstance(unassigned_path_to_use[0], int)):
-                pass
-            elif unassigned_path_to_use == 'all':
-                unassigned_path_to_use = self.available_paths
-
-            to_iter = unassigned_path_to_use
-        else:
-            to_iter = self.paths_per_class.values()
-
-        logits = []
-
-        for path in to_iter:
-            p, v = path
-            path = iter(p)
-            _x = x
-            current_path = 0
-            feats = []
-
-            for l in self.layers[:-1]:
-                _p = next(path)
-                _x, f = l(_x, _p, current_path)
-                _x = _x.relu()
-                # f = nn.functional.adaptive_avg_pool2d(_x, 2).flatten(1)
-                feats.append(f)
-
-                current_path = _p
-
-            _, _x = self.layers[-1](_x, next(path), current_path)
-            # _x = nn.functional.adaptive_avg_pool2d(_x, 2).flatten(1)
-
-            feats.append(_x.flatten(1))
-
-            if str(v) in self.translate:
-                # l = l + self.translate[str(v)](l)
-                _x = (_x * self.gates[str(v)](_x).sigmoid()
-                      + self.translate[str(v)](_x))
-
-            _x = torch.cat(feats, -1)
-
-            logits.append(_x)
-
-        return torch.stack(logits, 1)
-
     def features(self, x, *,
                  unassigned_path_to_use=None, **kwargs):
 
@@ -2157,16 +2141,17 @@ class MoELogits(MultiTaskModule):
             # _x = _x.relu()
             feats.append(f)
 
-        _, f = self.layers[-1](_x, next(paths_iterable))
-        feats.append(f)
+        _x, f = self.layers[-1](_x, next(paths_iterable))
+        feats.append(_x)
 
         if self.cumulative:
             feats = [torch.cat(l, -1 )for l in list(zip(*feats))]
             logits = torch.stack(feats, 1)
         else:
             logits = torch.stack(f, 1)
+            # logits = torch.stack(f, 1).relu()
 
-        return logits
+        return logits, feats
 
 
 class _MoELogits(MultiTaskModule):
@@ -2368,14 +2353,14 @@ def train(train_stream, test_stream, theta=1, train_epochs=1,
         ],
     )
 
-    colors = distinctipy.get_colors(len(train_stream) + 1)
+    # colors = distinctipy.get_colors(len(train_stream) + 1)
 
     trainer = Trainer(model=complete_model, optimizer=optimizer,
                       train_mb_size=32, eval_every=5,
                       eval_mb_size=32, evaluator=eval_plugin,
                       criterion=criterion, device=device,
                       train_epochs=train_epochs)
-    #
+
     # class Model(DynamicModule):
     #     def __init__(self, *args, **kwargs):
     #         super().__init__(*args, **kwargs)
@@ -2402,7 +2387,7 @@ def train(train_stream, test_stream, theta=1, train_epochs=1,
     #         return x
     #         # return self.classifier(x, task_labels=task_labels)
     #
-    # trainer = DER(mem_size=200, model=Model(),
+    # trainer = Replay(mem_size=2500, model=Model(),
     #               criterion=criterion, optimizer=optimizer,
     #               train_epochs=train_epochs, eval_every=5,
     #               train_mb_size=32, evaluator=eval_plugin,
@@ -2415,7 +2400,38 @@ def train(train_stream, test_stream, theta=1, train_epochs=1,
         # trainer.eval(test_stream[:current_task_id + 1])
         # trainer.eval(test_stream[current_task_id])
 
+        continue
         complete_model.eval()
+
+        all_features = []
+        all_labels = []
+
+        with torch.no_grad():
+            for d in test_stream[:current_task_id + 1]:
+                for x, y, t in DataLoader(d.dataset):
+                    x = x.to(device)
+                    all_labels.append(y.numpy())
+
+                    f = complete_model(x)[1]
+                    all_features.append(f.cpu().numpy())
+
+        all_labels = np.concatenate(all_labels, 0)
+        all_features = np.concatenate(all_features, 0)
+
+        import sklearn
+
+        for c in range(all_features.shape[1]):
+            pca = sklearn.decomposition.PCA(2)
+            f = all_features[:, c]
+            f = pca.fit_transform(f)
+            labels = (c == all_labels).astype(int)
+            labels = ['red' if y != c else 'blue' for y in all_labels]
+
+            fig = plt.figure()
+            plt.scatter(f[:, 0], f[:, 1], color=labels)
+            plt.show()
+            plt.close(fig)
+
         continue
         with torch.no_grad():
             for i, (c, d) in enumerate(

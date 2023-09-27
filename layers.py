@@ -1119,6 +1119,8 @@ class BlockRoutingLayer(DynamicModule):
                 if len(self.projectors) > 0:
                     l = self.projectors[str(_bid)](f)
                     ret_l.append(l)
+                else:
+                    ret_l.append(f)
 
                 ret.append(f)
 
