@@ -1546,9 +1546,9 @@ class Trainer(SupervisedTemplate):
                 classes = [self.tasks_nclasses[t.item()] for t in
                            self.mb_task_id]
 
-                mask = torch.zeros(len(classes), past_logits.shape[1])
-                mask = torch.scatter(mask, 1, torch.tensor(classes), 1)
-                mask = mask.to(self.device)[bs:]
+                # mask = torch.zeros(len(classes), past_logits.shape[1])
+                # mask = torch.scatter(mask, 1, torch.tensor(classes), 1)
+                # mask = mask.to(self.device)[bs:]
 
                 if self.gamma > 0:
                     # self.internal_distillation
@@ -1585,11 +1585,8 @@ class Trainer(SupervisedTemplate):
                         classes = len(self.experience.classes_in_this_experience)
 
                         if self.logit_regularization == 'kl':
-                            # curr_logits = curr_logits * mask
-                            # past_logits = past_logits * mask
-
-                            curr_logits = torch.softmax(curr_logits / self.tau, -1)[:, :-classes]
-                            past_logits = torch.softmax(past_logits / self.tau, -1)[:, :-classes]
+                            curr_logits = torch.log_softmax(curr_logits / self.tau, -1)
+                            past_logits = torch.softmax(past_logits / self.tau, -1)
 
                             lr = nn.functional.kl_div(curr_logits.log(),
                                                        past_logits)
@@ -1925,7 +1922,13 @@ class MoECentroids(MultiTaskModule):
 
 
 class MoELogits(MultiTaskModule):
-    def __init__(self, cumulative=False, freeze=False, freeze_future=True):
+    def __init__(self,
+                 cumulative=False,
+                 freeze_past_tasks=False,
+                 freeze_future_logits=True,
+                 path_selection_strategy='usage',
+                 prediction_mode='task'):
+
         super().__init__()
 
         self.forced_future = 0
@@ -1937,8 +1940,13 @@ class MoELogits(MultiTaskModule):
         self.use_future = True
         self.cumulative = cumulative
 
-        self.freeze_future = freeze_future
-        self.freeze = freeze
+        self.freeze_future_logits = freeze_future_logits
+        self.freeze_past_tasks = freeze_past_tasks
+        self.path_selection_strategy = path_selection_strategy
+        self.prediction_mode = prediction_mode
+
+        assert path_selection_strategy in ['random', 'usage']
+        assert prediction_mode in ['class', 'task']
 
         self.distance = 'cosine'
         self.adapt = True
@@ -1982,9 +1990,10 @@ class MoELogits(MultiTaskModule):
                 paths.append(v)
 
         self.available_paths = paths
-        self.paths_per_class = {}
+        self.associated_paths = {}
+        self.n_classes_seen_so_far = 0
 
-        if freeze or freeze_future:
+        if freeze_past_tasks or freeze_future_logits:
             for l in self.layers:
                 l.freeze_blocks()
 
@@ -1992,26 +2001,58 @@ class MoELogits(MultiTaskModule):
                 p.requires_grad_(False)
 
     def eval_adaptation(self, experience):
-        if len(experience.classes_seen_so_far) > len(self.paths_per_class):
-            self.forced_future = len(experience.classes_seen_so_far) - len(
-                self.paths_per_class)
-        else:
-            self.forced_future = 0
+        self.forced_future = 0
+
+        v = len(experience.classes_seen_so_far) - self.n_classes_seen_so_far
+        if v > 0:
+            self.forced_future = v
 
     def train_adaptation(self, experience):
         if not self.adapt:
             return
         self.forced_future = 0
 
-        curr_classes = experience.classes_in_this_experience
+        task_classes = len(experience.classes_in_this_experience)
+        self.n_classes_seen_so_far += task_classes
+        to_samples = task_classes if self.prediction_mode == 'logits' else 1
 
-        selected_paths = np.random.choice(np.arange(len(self.available_paths)),
-                                          len(curr_classes),
-                                          replace=False)
-        paths = [self.available_paths[i] for i in selected_paths]
+        if self.path_selection_strategy == 'random' or len(self.associated_paths) == 0:
+            selected_paths = np.random.choice(np.arange(len(self.available_paths)),
+                                              to_samples,
+                                              replace=False)
+            paths = [self.available_paths[i] for i in selected_paths]
 
-        if self.freeze:
-            for pt, v in self.paths_per_class.values():
+        elif self.path_selection_strategy == 'usage':
+            probs = []
+
+            used_blocks = set()
+            for c, (p, v) in self.associated_paths.items():
+                for i, b in enumerate(p):
+                    used_blocks.add(f'{i}_{b}')
+
+            for p, v in self.available_paths:
+                c = 0
+                for i, b in enumerate(p):
+                    s = f'{i}_{b}'
+                    if s in used_blocks:
+                        c += 1
+
+                c = c / len(p)
+                probs.append(c)
+
+            probs = np.asarray(probs) / sum(probs)
+            selected_paths = np.random.choice(np.arange(len(self.available_paths)),
+                                              to_samples,
+                                              replace=False,
+                                              p=probs)
+
+            paths = [self.available_paths[i] for i in selected_paths]
+
+        else:
+            assert False
+
+        if self.freeze_past_tasks:
+            for pt, v in self.associated_paths.values():
 
                 for p in self.centroids[str(v)].parameters():
                     p.requires_grad_(False)
@@ -2026,11 +2067,18 @@ class MoELogits(MultiTaskModule):
         # for b, l in zip(zip(*[p[0] for p in paths]), self.layers):
         #     l.activate_blocks(b)
 
-        for c, p in zip(experience.classes_in_this_experience, paths):
-            self.available_paths.remove(p)
-            self.paths_per_class[c] = p
+        z = experience.classes_in_this_experience \
+            if self.prediction_mode == 'logits' else experience.task_labels
 
-            if self.freeze or self.freeze_future:
+        for c, p in zip(z, paths):
+            self.available_paths.remove(p)
+            self.associated_paths[c] = p
+
+            if self.prediction_mode == 'task':
+                l = nn.Linear(self.in_features, task_classes)
+                self.centroids[str(p[1])] = l
+
+            if self.freeze_past_tasks or self.freeze_future_logits:
                 for b, l in zip(p[0], self.layers):
                     l.freeze_block(b, False)
 
@@ -2050,7 +2098,7 @@ class MoELogits(MultiTaskModule):
                 # assert len(task_labels) == 1
                 task_labels = task_labels[0]
 
-        base_paths = list(self.paths_per_class.values())
+        base_paths = list(self.associated_paths.values())
         random_paths = []
 
         if self.training and self.use_future:
@@ -2074,7 +2122,7 @@ class MoELogits(MultiTaskModule):
         for i, (_,v) in enumerate(all_paths):
             l = self.centroids[str(v)](features[:, i])
 
-            if self.freeze and str(v) in self.centroids_scaler:
+            if self.freeze_past_tasks and str(v) in self.centroids_scaler:
                 l = l / self.centroids_scaler[str(v)]
             logits.append(l)
 
@@ -2085,13 +2133,20 @@ class MoELogits(MultiTaskModule):
         random_features = None
         random_logits = None
 
-        if len(base_paths) > 0:
-            if len(random_paths) > 0:
-                random_logits = logits[:, -len(random_paths):]
-                random_features = features[:, -len(random_paths):]
+        # if len(base_paths) > 0:
+        #     if len(random_paths) > 0:
+        #         random_logits = logits[:, -len(random_paths):]
+        #         random_features = features[:, -len(random_paths):]
+        #
+        #     features = features[:, :len(base_paths)]
+        #     logits = logits[:, :len(base_paths)]
 
-            features = features[:, :len(base_paths)]
-            logits = logits[:, :len(base_paths)]
+        if len(base_paths) > 0 and len(random_paths) > 0:
+            random_logits = logits[:, -len(random_paths):]
+            random_features = features[:, -len(random_paths):]
+
+            features = features[:, :-len(random_paths)]
+            logits = logits[:, :-len(random_paths)]
 
         # else:
         #     centroids = torch.stack([self.centroids[str(v)]
@@ -2127,7 +2182,7 @@ class MoELogits(MultiTaskModule):
 
             to_iter = unassigned_path_to_use
         else:
-            to_iter = self.paths_per_class.values()
+            to_iter = self.associated_paths.values()
 
         feats = []
 
@@ -2521,7 +2576,7 @@ if __name__ == '__main__':
     train_tasks = cifar10_train_stream
     test_tasks = cifar10_test_stream
 
-    model = train(train_epochs=20,
+    model = train(train_epochs=2,
                   fine_tune_epochs=0,
                   train_stream=train_tasks,
                   test_stream=test_tasks)
