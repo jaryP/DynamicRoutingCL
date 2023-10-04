@@ -177,7 +177,7 @@ def avalanche_training(cfg: DictConfig):
 
     base_path = os.getcwd()
 
-    sit = not task_incremental_learning
+    cil = not task_incremental_learning
     task_incremental_learning = task_incremental_learning if plugin_name != 'cml' \
         else True
 
@@ -199,11 +199,11 @@ def avalanche_training(cfg: DictConfig):
         results_path = os.path.join(experiment_path, 'results.json')
         train_results_path = os.path.join(experiment_path, 'train_results.json')
 
-        if plugin_name in ['icarl', 'cope', 'ssil'] and not sit:
-            assert sit, 'ICarL , CoPE, and ssil only work under Class Incremental Scenario'
+        if plugin_name in ['icarl', 'cope', 'ssil', 'moe'] and not cil:
+            assert cil, 'ICarL , CoPE, and ssil only work under Class Incremental Scenario'
 
-        if plugin_name in ['er'] and sit:
-            assert sit, 'ER only work under Task Incremental Scenario'
+        if plugin_name in ['er'] and cil:
+            assert cil, 'ER only work under Task Incremental Scenario'
 
         tasks = get_dataset_nc_scenario(name=dataset,
                                         scenario=scenario_name,
@@ -235,7 +235,7 @@ def avalanche_training(cfg: DictConfig):
             model = get_cl_model(model_name=model_name,
                                  input_shape=tuple(img.shape),
                                  method_name=plugin_name,
-                                 sit=sit)
+                                 sit=cil)
 
             file_path = os.path.join(experiment_path, 'results.txt')
             output_file = open(file_path, 'w')
@@ -262,7 +262,7 @@ def avalanche_training(cfg: DictConfig):
 
             trainer = get_trainer(**method,
                                   tasks=tasks,
-                                  sit=sit)
+                                  sit=cil)
 
             strategy = trainer(model=model,
                                criterion=criterion,

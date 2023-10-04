@@ -1,3 +1,4 @@
+import itertools
 from builtins import enumerate
 from copy import deepcopy
 from itertools import chain
@@ -945,7 +946,7 @@ class Trainer(SupervisedTemplate):
         self.delta = 0
 
         # Past task logits weight
-        self.gamma = 0.5
+        self.gamma = 1
         self.logit_regularization = 'mse'
         self.tau = 1
 
@@ -1533,8 +1534,8 @@ class Trainer(SupervisedTemplate):
                 past_reg = past_reg * self.past_task_reg * w
 
             if isinstance(self.model, MoELogits):
-                loss1 = nn.functional.cross_entropy(pred1, y1, label_smoothing=0)
-                loss2 = nn.functional.cross_entropy(pred2, y2, label_smoothing=0)
+                loss1 = nn.functional.cross_entropy(pred1, y1)
+                loss2 = nn.functional.cross_entropy(pred2, y2)
             else:
                 pred1 = torch.log_softmax(pred1, 1)
                 pred2 = torch.log_softmax(pred2, 1)
@@ -1956,7 +1957,7 @@ class MoELogits(MultiTaskModule):
                  freeze_future_logits=True,
                  future_paths_to_sample=5,
                  sample_wise_future_sampling=False,
-                 path_selection_strategy='random',
+                 path_selection_strategy='gradient',
                  prediction_mode='task'):
 
         super().__init__()
@@ -1977,7 +1978,8 @@ class MoELogits(MultiTaskModule):
         self.future_paths_to_sample = future_paths_to_sample
         self.sample_wise_future_sampling = sample_wise_future_sampling
 
-        assert path_selection_strategy in ['random', 'usage']
+        assert path_selection_strategy in ['random', 'usage', 'gradient']
+        # assert path_selection_strategy in ['random', 'usage']
         assert prediction_mode in ['class', 'task']
 
         self.distance = 'cosine'
@@ -2003,26 +2005,40 @@ class MoELogits(MultiTaskModule):
 
         layers_blocks = [len(l.blocks) for l in self.layers]
         paths = []
-
         self.centroids = nn.ModuleDict()
         self.centroids_scaler = nn.ParameterDict()
 
-        while len(paths) < 100:
-            b = [np.random.randint(0, l) for l in layers_blocks]
-            if b not in paths:
-                ln = len(paths)
-                v = (b, ln)
-                self.centroids[str(ln)] = nn.Sequential(nn.Flatten(1),
-                                                        # nn.ReLU(),
-                                                        # CosineLinearLayer(self.in_features),
-                                                        # ConcatLinearLayer(self.in_features, 100)
-                                                        nn.Sequential(nn.ReLU(), nn.Linear(self.in_features, 1)),
-                                                        # nn.Sigmoid()
-                                                        )
-                paths.append(v)
+        paths = list(itertools.product(*[range(len(l.blocks))
+                                         for l in self.layers]))
+        for i, p in enumerate(paths):
+            self.centroids[str(i)] = nn.Sequential(nn.Flatten(1),
+                                                    # nn.ReLU(),
+                                                    # CosineLinearLayer(self.in_features),
+                                                    # ConcatLinearLayer(self.in_features, 100)
+                                                    nn.Sequential(nn.ReLU(),
+                                                                  nn.Linear(
+                                                                      self.in_features,
+                                                                      1)),
+                                                    # nn.Sigmoid()
+                                                    )
+            paths[i] = (p, i)
+
+        # while len(paths) < 100:
+        #     b = [np.random.randint(0, l) for l in layers_blocks]
+        #     if b not in paths:
+        #         ln = len(paths)
+        #         v = (b, ln)
+        #         self.centroids[str(ln)] = nn.Sequential(nn.Flatten(1),
+        #                                                 # nn.ReLU(),
+        #                                                 # CosineLinearLayer(self.in_features),
+        #                                                 # ConcatLinearLayer(self.in_features, 100)
+        #                                                 nn.Sequential(nn.ReLU(), nn.Linear(self.in_features, 1)),
+        #                                                 # nn.Sigmoid()
+        #                                                 )
+        #         paths.append(v)
 
         self.available_paths = paths
-        self.associated_paths = {}
+        self.assigned_paths = {}
         self.n_classes_seen_so_far = 0
 
         if freeze_past_tasks or freeze_future_logits:
@@ -2048,7 +2064,7 @@ class MoELogits(MultiTaskModule):
         self.n_classes_seen_so_far += task_classes
         to_samples = task_classes if self.prediction_mode == 'class' else 1
 
-        if self.path_selection_strategy == 'random' or len(self.associated_paths) == 0:
+        if self.path_selection_strategy == 'random' or len(self.assigned_paths) == 0:
             selected_paths = np.random.choice(np.arange(len(self.available_paths)),
                                               to_samples,
                                               replace=False)
@@ -2058,7 +2074,7 @@ class MoELogits(MultiTaskModule):
             probs = []
 
             used_blocks = set()
-            for c, (p, v) in self.associated_paths.items():
+            for c, (p, v) in self.assigned_paths.items():
                 for i, b in enumerate(p):
                     used_blocks.add(f'{i}_{b}')
 
@@ -2072,7 +2088,10 @@ class MoELogits(MultiTaskModule):
                 c = c / len(p)
                 probs.append(c)
 
-            probs = np.asarray(probs) / sum(probs)
+            probs = np.asarray(probs)
+            probs = np.exp(probs)
+
+            probs = probs / sum(probs)
             selected_paths = np.random.choice(np.arange(len(self.available_paths)),
                                               to_samples,
                                               replace=False,
@@ -2080,11 +2099,69 @@ class MoELogits(MultiTaskModule):
 
             paths = [self.available_paths[i] for i in selected_paths]
 
+        elif self.path_selection_strategy == 'gradient':
+
+            d = DataLoader(experience.dataset, batch_size=128, shuffle=True)
+            x, labels, _ = next(iter(d))
+            x = x.to(next(self.parameters()).device)
+
+            if self.prediction_mode == 'class':
+                xs = [x[labels == l] for l in torch.unique(labels)]
+            else:
+                xs = [x]
+
+            paths = []
+            with torch.enable_grad():
+                for x in xs:
+                    past_paths = list(self.assigned_paths.values())
+                    features, _ = self.features(x, unassigned_path_to_use=past_paths)
+                    logits = []
+
+                    for i, (_, v) in enumerate(past_paths):
+                        l = self.centroids[str(v)](features[:, i])
+
+                        if self.freeze_past_tasks and str(
+                                v) in self.centroids_scaler:
+                            l = l / self.centroids_scaler[str(v)]
+                        logits.append(l)
+
+                    past_logits = torch.cat(logits, 1)
+                    past_max = past_logits.max(-1).values.detach()
+                    best_val = (np.inf, None)
+
+                    for i in range(0, len(self.available_paths), 10):
+                        pts = self.available_paths[i:i+10]
+
+                        features, _ = self.features(x, unassigned_path_to_use=pts)
+                        logits = []
+
+                        for i, (_, v) in enumerate(pts):
+                            l = self.centroids[str(v)](features[:, i])
+                            logits.append(l)
+
+                        logits = torch.cat(logits, -1)
+                        alphas = nn.Parameter(torch.ones((1, logits.shape[-1]), device=next(self.parameters()).device))
+                        logits = logits * alphas
+
+                        diff = past_max[:, None] - logits
+                        diff = torch.maximum(torch.zeros_like(diff), diff + 0.5)
+
+                        grad = torch.autograd.grad(diff.mean(), alphas,
+                                                   retain_graph=False,
+                                                   create_graph=False)[0]
+
+                        (mn, val) = [v.item() for v in grad.min(-1)]
+                        val = pts[val]
+                        if mn < best_val[0] and val not in paths:
+                            best_val = (mn, val)
+
+                    paths.append(best_val[1])
+
         else:
             assert False
 
         if self.freeze_past_tasks:
-            for pt, v in self.associated_paths.values():
+            for pt, v in self.assigned_paths.values():
 
                 for p in self.centroids[str(v)].parameters():
                     p.requires_grad_(False)
@@ -2104,7 +2181,7 @@ class MoELogits(MultiTaskModule):
 
         for c, p in zip(z, paths):
             self.available_paths.remove(p)
-            self.associated_paths[c] = p
+            self.assigned_paths[c] = p
 
             if self.prediction_mode == 'task':
                 l = nn.Linear(self.in_features, task_classes)
@@ -2116,6 +2193,7 @@ class MoELogits(MultiTaskModule):
 
                 for p in self.centroids[str(p[1])].parameters():
                     p.requires_grad_(True)
+        print(self.assigned_paths)
 
     def forward(self,
                 x: torch.Tensor,
@@ -2130,7 +2208,7 @@ class MoELogits(MultiTaskModule):
                 # assert len(task_labels) == 1
                 task_labels = task_labels[0]
 
-        base_paths = list(self.associated_paths.values())
+        base_paths = list(self.assigned_paths.values())
         random_paths = []
 
         random_features = None
@@ -2260,7 +2338,7 @@ class MoELogits(MultiTaskModule):
 
             to_iter = unassigned_path_to_use
         else:
-            to_iter = self.associated_paths.values()
+            to_iter = self.assigned_paths.values()
 
         feats = []
 
@@ -2620,8 +2698,8 @@ def train(train_stream, test_stream, theta=1, train_epochs=1,
 
 
 if __name__ == '__main__':
-    # cifar_train, cifar_test = get_cifar10_dataset(None)
-    cifar_train, cifar_test = get_cifar100_dataset(None)
+    cifar_train, cifar_test = get_cifar10_dataset(None)
+    # cifar_train, cifar_test = get_cifar100_dataset(None)
 
     _default_cifar10_train_transform = transforms.Compose(
         [
