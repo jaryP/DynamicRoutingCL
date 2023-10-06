@@ -940,13 +940,16 @@ class Trainer(SupervisedTemplate):
 
         self.past_task_reg = 0.5
         self.past_margin = 0.2
-        self.warm_up_epochs = 5
+        self.warm_up_epochs = 0
+
+        self.future_task_reg = 0.1
+        self.future_margin = 2
 
         # Past task features weight
         self.delta = 0
 
         # Past task logits weight
-        self.gamma = 1
+        self.gamma = 0.5
         self.logit_regularization = 'mse'
         self.tau = 1
 
@@ -1475,6 +1478,8 @@ class Trainer(SupervisedTemplate):
             self.past_model.eval()
 
     def criterion(self):
+        tid = self.experience.current_experience
+
         if not self.is_training:
             if isinstance(self.model, MoELogits):
                 loss_val = nn.functional.cross_entropy(self.mb_output, self.mb_y)
@@ -1506,8 +1511,6 @@ class Trainer(SupervisedTemplate):
             pred1, pred2 = torch.split(pred, [s, s1], 0)
             y1, y2 = torch.split(self.mb_y, [s, s1], 0)
 
-            tid = self.experience.current_experience
-            # if tid > 0:
             y1 = y1 - min(self.experience.classes_in_this_experience) # min(classes_in_this_experience)
 
             neg_pred1 = pred1[:, :len(self.experience.previous_classes)]
@@ -1515,23 +1518,19 @@ class Trainer(SupervisedTemplate):
 
             w = 1
             if self.warm_up_epochs > 0:
-                # w = 2 ** self.clock.train_exp_epochs / 2 ** self.warm_up_epochs
-                w = float(self.clock.train_exp_epochs / self.warm_up_epochs >= 1)
+                # w = float(self.clock.train_exp_epochs / self.warm_up_epochs >= 1)
+                w = self.clock.train_exp_epochs / self.warm_up_epochs
 
-            if w > 0:
-                mx = neg_pred1.max(-1).values
+            if w >= 1:
+                mx = neg_pred1.max(-1).values.detach()
                 mx_current_classes = pred1[range(len(pred1)), y1]
 
                 margin_dist = torch.maximum(torch.zeros_like(mx), mx - mx_current_classes + self.past_margin)
+                # margin_dist = margin_dist[margin_dist > 0]
+
                 past_reg = margin_dist.mean()
 
-                # margin_dist = torch.maximum(torch.zeros_like(mx), mx - mx_current_classes + self.past_margin)
-                # past_reg = margin_dist[margin_dist > 0].mean()
-                # past_reg = margin_dist.sum() / torch.sum(margin_dist > 0)
-
-                    # w = min(w, 1)
-
-                past_reg = past_reg * self.past_task_reg * w
+                past_reg = past_reg * self.past_task_reg
 
             if isinstance(self.model, MoELogits):
                 loss1 = nn.functional.cross_entropy(pred1, y1)
@@ -1543,6 +1542,15 @@ class Trainer(SupervisedTemplate):
                 loss2 = -pred2.gather(1, y2.unsqueeze(-1)).squeeze(-1).mean()
 
             loss_val = loss1 + self.alpha * loss2
+
+        if self.future_task_reg > 0:
+            future_logits = self.mb_future_logits
+            future_mx = future_logits.max(-1).values
+            current_mx = self.mb_output.max(-1).values
+
+            reg = current_mx - future_mx - self.future_margin
+            reg = torch.maximum(torch.zeros_like(reg), reg)
+            future_reg = reg.mean() * self.future_task_reg
 
         loss = loss_val + past_reg + future_reg
 
@@ -1656,8 +1664,11 @@ class Trainer(SupervisedTemplate):
                     # past_features = past_features[range(len(curr_features)), y]
                     classes = len(self.experience.classes_in_this_experience)
 
-                    curr_features = curr_features[:, :-classes].movedim(-2, -1)
-                    past_features = past_features[:, :-classes].movedim(-2, -1)
+                    # curr_features = curr_features[:, :-classes]
+                    # past_features = past_features[:, :-classes]
+
+                    curr_features = curr_features
+                    past_features = past_features
 
                     dist = nn.functional.mse_loss(curr_features, past_features)
 
@@ -1705,259 +1716,15 @@ class Trainer(SupervisedTemplate):
         return loss
 
 
-class MoECentroids(MultiTaskModule):
-    def __init__(self, cumulative=False):
-        super().__init__()
-
-        self.forced_future = 0
-        self.current_features = None
-        self.centroids = None
-        self.use_future = True
-        self.cumulative = cumulative
-
-        self.distance = 'cosine'
-        self.adapt = True
-
-        self.layers = nn.ModuleList()
-
-        self.layers.append(BlockRoutingLayer(3, 32, project_dim=None, get_average_features=True))
-        self.layers.append(BlockRoutingLayer(32, 64, project_dim=None, get_average_features=True))
-        self.layers.append(BlockRoutingLayer(64, 128, project_dim=None, get_average_features=True))
-
-        self.mx = nn.Sequential(nn.ReLU())
-
-        if cumulative:
-            self.in_features = 32 * 4 + 64 * 4 + 128 * 4
-        else:
-            self.in_features = 128 * 16
-
-        self.classifiers = nn.ParameterDict()
-
-        self.gates = nn.ModuleDict()
-        self.translate = nn.ModuleDict()
-
-        layers_blocks = [len(l.blocks) for l in self.layers]
-        paths = []
-
-        self.centroids = nn.ParameterDict()
-
-        orth = torch.randn(100, self.in_features) * 0.01
-        # svd = torch.linalg.svd(centroids)
-        # orth = svd[0] @ svd[2]
-
-        while len(paths) < 100:
-            b = [np.random.randint(0, l) for l in layers_blocks]
-            if b not in paths:
-                ln = len(paths)
-                v = (b, ln)
-                self.centroids[str(ln)] = nn.Parameter(orth[ln],
-                                                       requires_grad=False)
-                paths.append(v)
-
-        self.available_paths = paths
-        self.paths_per_class = {}
-
-        # for l in self.layers:
-        #     l.freeze_blocks()
-
-    def eval_adaptation(self, experience):
-        if len(experience.classes_seen_so_far) > len(self.paths_per_class):
-            self.forced_future = len(experience.classes_seen_so_far) - len(
-                self.paths_per_class)
-        else:
-            self.forced_future = 0
-
-    def train_adaptation(self, experience):
-        if not self.adapt:
-            return
-        self.forced_future = 0
-
-        curr_classes = experience.classes_in_this_experience
-
-        selected_paths = np.random.choice(np.arange(len(self.available_paths)),
-                                          len(curr_classes),
-                                          replace=False)
-        paths = [self.available_paths[i] for i in selected_paths]
-
-        for p, v in self.paths_per_class.values():
-            self.centroids[str(v)].requires_grad_(False)
-            # print(self.centroids[str(v)])
-
-        for c, p in zip(experience.classes_in_this_experience, paths):
-            self.available_paths.remove(p)
-            self.paths_per_class[c] = p
-
-            _, v = p
-            self.centroids[str(v)].requires_grad_(True)
-
-        for b, l in zip(zip(*[p[0] for p in paths]), self.layers):
-            l.activate_blocks(b)
-
-    def forward(self,
-                x: torch.Tensor,
-                task_labels: torch.Tensor = None,
-                **kwargs) \
-            -> Tuple[
-                Tensor, Union[Tensor, Any], Optional[None], Optional[None]]:
-
-        if task_labels is not None:
-            if not isinstance(task_labels, int):
-                task_labels = torch.unique(task_labels)
-                # assert len(task_labels) == 1
-                task_labels = task_labels[0]
-
-        base_paths = list(self.paths_per_class.values())
-        random_paths = []
-
-        if self.training and self.use_future:
-            sampled_paths = np.random.choice(
-                np.arange(len(self.available_paths)),
-                5, replace=True)
-            random_paths = [self.available_paths[p] for p in sampled_paths]
-
-        if self.forced_future > 0:
-            sampled_paths = np.random.choice(
-                np.arange(len(self.available_paths)),
-                self.forced_future, replace=True)
-            base_paths += [self.available_paths[p] for p in sampled_paths]
-
-        all_paths = base_paths + random_paths
-        logits = self.features(x, unassigned_path_to_use=all_paths)
-
-        random_logits = None
-        random_preds = None
-
-        if len(base_paths) > 0:
-            if len(random_paths) > 0:
-                random_logits = logits[:, -len(random_paths):]
-                random_centroids = torch.stack([self.centroids[str(v)]
-                                                for _, v in random_paths], 0)
-
-            centroids = torch.stack([self.centroids[str(v)]
-                                     for _, v in base_paths], 0)
-            logits = logits[:, :len(base_paths)]
-
-        else:
-            centroids = torch.stack([self.centroids[str(v)]
-                                     for _, v in all_paths], 0)
-
-        if self.distance == 'euclidean':
-            preds = - torch.pow(logits - centroids, 2).sum(2).sqrt()
-        else:
-            preds = torch.cosine_similarity(logits, centroids, -1)
-
-        if random_logits is not None:
-            if self.distance == 'euclidean':
-                random_preds = - torch.pow(random_logits - random_centroids, 2).sum(
-                    2).sqrt()
-            else:
-                random_preds = torch.cosine_similarity(random_logits,
-                                                       random_centroids,
-                                                       -1)
-
-        return preds, logits, random_preds, random_logits
-
-    def features1(self, x, *,
-                  task_labels=None,
-                  unassigned_path_to_use=None, **kwargs):
-        # assert (task_labels is None) ^ (path_id is None)
-        if unassigned_path_to_use is not None:
-            if isinstance(unassigned_path_to_use, tuple):
-                unassigned_path_to_use = [unassigned_path_to_use]
-            # elif isinstance(non_assigned_paths, int):
-            #     non_assigned_paths = [non_assigned_paths]
-            elif (isinstance(unassigned_path_to_use, list)
-                  and isinstance(unassigned_path_to_use[0], int)):
-                pass
-            elif unassigned_path_to_use == 'all':
-                unassigned_path_to_use = self.available_paths
-
-            to_iter = unassigned_path_to_use
-        else:
-            to_iter = self.paths_per_class.values()
-
-        logits = []
-
-        for path in to_iter:
-            p, v = path
-            path = iter(p)
-            _x = x
-            current_path = 0
-            feats = []
-
-            for l in self.layers[:-1]:
-                _p = next(path)
-                _x, f = l(_x, _p, current_path)
-                _x = _x.relu()
-                # f = nn.functional.adaptive_avg_pool2d(_x, 2).flatten(1)
-                feats.append(f)
-
-                current_path = _p
-
-            _, _x = self.layers[-1](_x, next(path), current_path)
-            # _x = nn.functional.adaptive_avg_pool2d(_x, 2).flatten(1)
-
-            feats.append(_x.flatten(1))
-
-            if str(v) in self.translate:
-                # l = l + self.translate[str(v)](l)
-                _x = (_x * self.gates[str(v)](_x).sigmoid()
-                      + self.translate[str(v)](_x))
-
-            _x = torch.cat(feats, -1)
-
-            logits.append(_x)
-
-        return torch.stack(logits, 1)
-
-    def features(self, x, *,
-                 unassigned_path_to_use=None, **kwargs):
-
-        if unassigned_path_to_use is not None:
-            if isinstance(unassigned_path_to_use, tuple):
-                unassigned_path_to_use = [unassigned_path_to_use]
-            elif (isinstance(unassigned_path_to_use, list)
-                  and isinstance(unassigned_path_to_use[0], int)):
-                assert False
-            elif unassigned_path_to_use == 'all':
-                unassigned_path_to_use = self.available_paths
-
-            to_iter = unassigned_path_to_use
-        else:
-            to_iter = self.paths_per_class.values()
-
-        feats = []
-
-        paths = list(zip(*[p for p, _ in to_iter]))
-        paths_iterable = iter(paths)
-        _x = [x] * len(paths[0])
-
-        for l in self.layers[:-1]:
-            _p = next(paths_iterable)
-            _x, f = l(_x, _p)
-            # _x = _x.relu()
-            feats.append(f)
-
-        _, f = self.layers[-1](_x, next(paths_iterable))
-        feats.append(f)
-
-        if self.cumulative:
-            feats = [torch.cat(l, -1 )for l in list(zip(*feats))]
-            logits = torch.stack(feats, 1)
-        else:
-            logits = torch.stack(f, 1)
-
-        return logits
-
-
 class MoELogits(MultiTaskModule):
     def __init__(self,
                  cumulative=False,
                  freeze_past_tasks=False,
                  freeze_future_logits=True,
+                 freeze_projectors=False,
                  future_paths_to_sample=5,
                  sample_wise_future_sampling=False,
-                 path_selection_strategy='gradient',
+                 path_selection_strategy='random',
                  prediction_mode='task'):
 
         super().__init__()
@@ -1977,6 +1744,7 @@ class MoELogits(MultiTaskModule):
         self.prediction_mode = prediction_mode
         self.future_paths_to_sample = future_paths_to_sample
         self.sample_wise_future_sampling = sample_wise_future_sampling
+        self.freeze_projectors = freeze_projectors
 
         assert path_selection_strategy in ['random', 'usage', 'gradient']
         # assert path_selection_strategy in ['random', 'usage']
@@ -2003,8 +1771,6 @@ class MoELogits(MultiTaskModule):
         self.gates = nn.ModuleDict()
         self.translate = nn.ModuleDict()
 
-        layers_blocks = [len(l.blocks) for l in self.layers]
-        paths = []
         self.centroids = nn.ModuleDict()
         self.centroids_scaler = nn.ParameterDict()
 
@@ -2089,8 +1855,6 @@ class MoELogits(MultiTaskModule):
                 probs.append(c)
 
             probs = np.asarray(probs)
-            probs = np.exp(probs)
-
             probs = probs / sum(probs)
             selected_paths = np.random.choice(np.arange(len(self.available_paths)),
                                               to_samples,
@@ -2140,23 +1904,23 @@ class MoELogits(MultiTaskModule):
                             logits.append(l)
 
                         logits = torch.cat(logits, -1)
-                        alphas = nn.Parameter(torch.ones((1, logits.shape[-1]), device=next(self.parameters()).device))
+                        alphas = nn.Parameter(torch.ones((1, logits.shape[-1]),
+                                                         device=next(self.parameters()).device))
                         logits = logits * alphas
 
                         diff = past_max[:, None] - logits
-                        diff = torch.maximum(torch.zeros_like(diff), diff + 0.5)
+                        diff = torch.maximum(torch.zeros_like(diff), diff)
 
                         grad = torch.autograd.grad(diff.mean(), alphas,
                                                    retain_graph=False,
                                                    create_graph=False)[0]
-
+                        # grad = - grad
                         (mn, val) = [v.item() for v in grad.min(-1)]
                         val = pts[val]
                         if mn < best_val[0] and val not in paths:
                             best_val = (mn, val)
 
                     paths.append(best_val[1])
-
         else:
             assert False
 
@@ -2193,6 +1957,12 @@ class MoELogits(MultiTaskModule):
 
                 for p in self.centroids[str(p[1])].parameters():
                     p.requires_grad_(True)
+
+        if self.freeze_projectors:
+            for _, v in self.assigned_paths.values():
+                for p in self.centroids[str(v)].parameters():
+                    p.requires_grad_(False)
+
         print(self.assigned_paths)
 
     def forward(self,
@@ -2366,166 +2136,6 @@ class MoELogits(MultiTaskModule):
             # logits = torch.stack(f, 1).relu()
 
         return logits, feats
-
-
-class _MoELogits(MultiTaskModule):
-    def __init__(self):
-        super().__init__()
-
-        self.forced_future = 0
-        self.current_features = None
-        self.centroids = None
-        self.use_future = True
-
-        self.distance = 'cosine'
-        self.adapt = True
-
-        self.layers = nn.ModuleList()
-
-        self.layers.append(BlockRoutingLayer(3, 32, project_dim=32))
-        self.layers.append(BlockRoutingLayer(32, 64, project_dim=64))
-        self.layers.append(BlockRoutingLayer(64, 128, project_dim=128))
-
-        self.mx = nn.Sequential(nn.ReLU())
-
-        in_features = 128 + 32 + 64
-
-        self.classifiers = nn.ParameterDict()
-
-        self.gates = nn.ModuleDict()
-        self.translate = nn.ModuleDict()
-
-        layers_blocks = [len(l.blocks) for l in self.layers]
-        paths = []
-
-        self.centroids = nn.ModuleDict()
-
-        while len(paths) < 100:
-            b = [np.random.randint(0, l) for l in layers_blocks]
-            if b not in paths:
-                ln = len(paths)
-                v = (b, ln)
-                self.centroids[str(ln)] = nn.Sequential(nn.Flatten(1),
-                                                        nn.ReLU(),
-                                                        CosineLinearLayer(in_features))
-                paths.append(v)
-
-        self.available_paths = paths
-        self.paths_per_class = {}
-
-    def eval_adaptation(self, experience):
-        if len(experience.classes_seen_so_far) > len(self.paths_per_class):
-            self.forced_future = len(experience.classes_seen_so_far) - len(
-                self.paths_per_class)
-        else:
-            self.forced_future = 0
-
-    def train_adaptation(self, experience):
-        if not self.adapt:
-            return
-        self.forced_future = 0
-
-        curr_classes = experience.classes_in_this_experience
-
-        selected_paths = np.random.choice(np.arange(len(self.available_paths)),
-                                          len(curr_classes),
-                                          replace=False)
-        paths = [self.available_paths[i] for i in selected_paths]
-
-        # for p, v in self.paths_per_class.values():
-        #     self.centroids[str(v)].requires_grad_(False)
-
-        for c, p in zip(experience.classes_in_this_experience, paths):
-            self.available_paths.remove(p)
-            self.paths_per_class[c] = p
-
-            _, v = p
-            # self.centroids[str(v)].requires_grad_(True)
-
-    def forward(self,
-                x: torch.Tensor,
-                task_labels: torch.Tensor = None,
-                **kwargs) \
-            -> Tuple[
-                Tensor, Union[Tensor, Any], Optional[None], Optional[None]]:
-
-        if task_labels is not None:
-            if not isinstance(task_labels, int):
-                task_labels = torch.unique(task_labels)
-                # assert len(task_labels) == 1
-                task_labels = task_labels[0]
-
-        base_paths = list(self.paths_per_class.values())
-        random_paths = []
-
-        if self.training and self.use_future:
-            sampled_paths = np.random.choice(
-                np.arange(len(self.available_paths)),
-                5, replace=True)
-            random_paths = [self.available_paths[p] for p in sampled_paths]
-
-        if self.forced_future > 0:
-            sampled_paths = np.random.choice(
-                np.arange(len(self.available_paths)),
-                self.forced_future, replace=True)
-            base_paths += [self.available_paths[p] for p in sampled_paths]
-
-        all_paths = base_paths + random_paths
-        logits = self.features(x, unassigned_path_to_use=all_paths)
-
-        preds = [self.centroids[str(v)](l) for l, (_, v) in zip(logits, all_paths)]
-        preds = torch.cat(preds, -1)
-
-        logits = torch.stack(logits, 1).flatten(2)
-
-        random_logits = None
-        random_preds = None
-
-        if len(base_paths) > 0 and len(random_paths) > 0:
-            random_logits = logits[:, -len(random_paths):]
-            random_preds = preds[:, -len(random_paths):]
-            logits = logits[:, :len(base_paths)]
-            preds = preds[:, :len(base_paths)]
-
-        return preds, logits, random_preds, random_logits
-
-    def features(self, x, *,
-                 unassigned_path_to_use=None, **kwargs):
-
-        if unassigned_path_to_use is not None:
-            if isinstance(unassigned_path_to_use, tuple):
-                unassigned_path_to_use = [unassigned_path_to_use]
-            elif (isinstance(unassigned_path_to_use, list)
-                  and isinstance(unassigned_path_to_use[0], int)):
-                assert False
-            elif unassigned_path_to_use == 'all':
-                unassigned_path_to_use = self.available_paths
-
-            to_iter = unassigned_path_to_use
-        else:
-            to_iter = self.paths_per_class.values()
-
-        feats = []
-
-        paths = list(zip(*[p for p, _ in to_iter]))
-        paths_iterable = iter(paths)
-        _x = [x] * len(paths[0])
-
-        for l in self.layers[:-1]:
-            _p = next(paths_iterable)
-            _x, f = l(_x, _p)
-            # _x = _x.relu()
-            feats.append(f)
-
-        logits, _x = self.layers[-1](_x, next(paths_iterable))
-        feats.append(_x)
-
-        logits = [torch.cat(l, -1 )for l in list(zip(*feats))]
-
-        # logits = [nn.functional.adaptive_avg_pool2d(l, 4).flatten(1)
-        #           for l in logits]
-
-        return logits
 
 
 torch.manual_seed(0)
