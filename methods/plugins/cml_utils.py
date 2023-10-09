@@ -5,8 +5,10 @@ import torch
 from avalanche.benchmarks.utils import AvalancheSubset, AvalancheConcatDataset, \
     AvalancheDataset
 from avalanche.models import MultiTaskModule
-from avalanche.training import BalancedExemplarsBuffer, BaseStrategy, \
+from avalanche.training import BalancedExemplarsBuffer, \
     ReservoirSamplingBuffer
+from avalanche.training.templates import SupervisedTemplate
+
 from matplotlib import pyplot as plt
 from sklearn.cluster import KMeans, SpectralClustering
 from torch import nn, autograd, log_softmax

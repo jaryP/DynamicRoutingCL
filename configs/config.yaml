@@ -1,0 +1,17 @@
+defaults:
+  - optimizer: sgd
+  - experiment: base
+  - override hydra/job_logging: dual
+hydra:
+  run:
+    dir: results/${scenario.scenario}/${method.save_name}
+  sweep:
+    dir: results/multirun/${scenario.scenario}/${method.save_name}
+    subdir: ${hydra.job.override_dirname}
+  job:
+    config:
+      override_dirname:
+        exclude_keys: ['device']
+        kv_sep: '='
+        item_sep: '_'
+device: cpu

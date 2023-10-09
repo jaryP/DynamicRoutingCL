@@ -1,10 +1,10 @@
 import torch
-from avalanche.training.plugins import StrategyPlugin
+from avalanche.core import SupervisedPlugin
 from torch import cosine_similarity
 from torch.utils.data import DataLoader
 
 
-class EmbeddingRegularizationPlugin(StrategyPlugin):
+class EmbeddingRegularizationPlugin(SupervisedPlugin):
     def __init__(self, mem_size: int, penalty_weight: float, distance: str = 'euclidean'):
         super().__init__()
 

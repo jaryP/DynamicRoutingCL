@@ -1,6 +1,5 @@
 import torch
-from avalanche.benchmarks.utils import AvalancheDataset
-from avalanche.benchmarks.utils.dataset_utils import ConstantSequence
+from avalanche.benchmarks.utils import AvalancheDataset, ConstantSequence
 from avalanche.models import MultiTaskModule
 from torch import nn
 
@@ -39,7 +38,7 @@ class CustomMultiHeadClassifier(MultiTaskModule):
         return self.classifiers[str(task_label)](x, **kwargs)
 
 
-class CombinedModel(MultiTaskModule):
+class AvalanceCombinedModel(MultiTaskModule):
     def __init__(self, backbone: nn.Module, classifier: nn.Module, p=None):
         super().__init__()
         self.feature_extractor = backbone
@@ -109,3 +108,13 @@ class CombinedModel(MultiTaskModule):
                                   device=out_task.device)
             out[task_mask] = out_task
         return out
+
+
+class PytorchCombinedModel(nn.Module):
+    def __init__(self, backbone: nn.Module, classifier: nn.Module, p=None):
+        super().__init__()
+        self.feature_extractor = backbone
+        self.classifier = classifier
+
+    def forward(self, x: torch.Tensor, **kwargs) -> torch.Tensor:
+        return self.classifier(self.feature_extractor(x))

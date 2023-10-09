@@ -25,7 +25,7 @@ from methods.plugins.cope import ContinualPrototypeEvolution
 from methods.plugins.er import EmbeddingRegularizationPlugin
 from methods.plugins.ewc import EWCCustomPlugin
 from methods.plugins.ssil import SeparatedSoftmax
-from models.utils import CombinedModel
+from models.utils import AvalanceCombinedModel
 
 
 class CustomSubset:
@@ -58,7 +58,7 @@ class EmbeddingRegularization(SupervisedTemplate):
     def __init__(self,
                  feature_extractor: nn.Module,
                  classifier: nn.Module,
-                 model: CombinedModel,
+                 model: AvalanceCombinedModel,
                  optimizer: Optimizer, criterion,
                  mem_size: int,
                  penalty_weight: float,
@@ -75,7 +75,7 @@ class EmbeddingRegularization(SupervisedTemplate):
                 feature_extractor = BatchNormModelWrap(feature_extractor)
                 break
 
-        model = CombinedModel(feature_extractor, classifier)
+        model = AvalanceCombinedModel(feature_extractor, classifier)
 
         rp = EmbeddingRegularizationPlugin(mem_size, penalty_weight)
         if plugins is None:
@@ -95,7 +95,7 @@ class EmbeddingRegularization(SupervisedTemplate):
 class ContinualMetricLearning(SupervisedTemplate):
 
     def __init__(self,
-                 model: CombinedModel,
+                 model: AvalanceCombinedModel,
                  dev_split_size: float,
                  optimizer: Optimizer,
                  criterion, penalty_weight: float,
@@ -191,7 +191,7 @@ class ContinualMetricLearning(SupervisedTemplate):
 
 class MemoryContinualMetricLearning(SupervisedTemplate):
     def __init__(self,
-                 model: CombinedModel,
+                 model: AvalanceCombinedModel,
                  dev_split_size: float,
                  optimizer: Optimizer,
                  criterion,
@@ -276,7 +276,7 @@ class MemoryContinualMetricLearning(SupervisedTemplate):
 class SeparatedSoftmaxIncrementalLearning(SupervisedTemplate):
 
     def __init__(self,
-                 model: CombinedModel,
+                 model: AvalanceCombinedModel,
                  optimizer: Optimizer,
                  criterion,
                  train_mb_size: int = 1,
@@ -308,7 +308,7 @@ class SeparatedSoftmaxIncrementalLearning(SupervisedTemplate):
 class CoPE(SupervisedTemplate):
 
     def __init__(self,
-                 model: CombinedModel,
+                 model: AvalanceCombinedModel,
                  optimizer: Optimizer,
                  criterion,
                  train_mb_size: int = 1,

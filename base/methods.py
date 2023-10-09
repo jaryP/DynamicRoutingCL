@@ -1,12 +1,13 @@
 from avalanche.training import Cumulative, GEM, Replay, Naive, JointTraining, \
-    EWC, ICaRL
+    EWC, ICaRL, DER
 from avalanche.training.plugins import GEMPlugin, ReplayPlugin
 
+from methods import ContinuosRouting
 from methods.strategies import EmbeddingRegularization, \
     ContinualMetricLearning, CustomEWC, SeparatedSoftmaxIncrementalLearning, \
     CoPE, MemoryContinualMetricLearning
 
-from models.utils import CombinedModel
+from models.utils import AvalanceCombinedModel
 
 
 def get_plugin(name, **kwargs):
@@ -27,19 +28,21 @@ def get_trainer(name, tasks, sit: bool = False, **kwargs):
     name = name.lower()
     num_experiences = len(tasks.train_stream)
 
-    def f(model: CombinedModel,
+    def f(model: AvalanceCombinedModel,
           criterion, optimizer,
           train_epochs: int,
           train_mb_size: int,
           evaluator,
-          device):
+          device,
+          eval_every=1, ):
 
         if name == 'gem':
             return GEM(patterns_per_exp=kwargs['patterns_per_experience'],
                        memory_strength=kwargs.get('memory_strength', 0.5),
                        model=model, criterion=criterion, optimizer=optimizer,
                        train_epochs=train_epochs, train_mb_size=train_mb_size,
-                       evaluator=evaluator, device=device)
+                       evaluator=evaluator, device=device,
+                       eval_every=eval_every)
         elif name == 'ewc':
             return CustomEWC(ewc_lambda=kwargs['ewc_lambda'],
                              mode='separate',
@@ -51,7 +54,8 @@ def get_trainer(name, tasks, sit: bool = False, **kwargs):
                              optimizer=optimizer,
                              train_epochs=train_epochs,
                              train_mb_size=train_mb_size,
-                             evaluator=evaluator, device=device)
+                             evaluator=evaluator, device=device,
+                             eval_every=eval_every)
         elif name == 'oewc':
             return CustomEWC(ewc_lambda=kwargs['ewc_lambda'],
                              mode='online',
@@ -63,27 +67,30 @@ def get_trainer(name, tasks, sit: bool = False, **kwargs):
                              optimizer=optimizer,
                              train_epochs=train_epochs,
                              train_mb_size=train_mb_size,
-                             evaluator=evaluator, device=device)
+                             evaluator=evaluator, device=device,
+                             eval_every=eval_every)
         elif name == 'replay':
             return Replay(mem_size=kwargs['mem_size'], model=model,
                           criterion=criterion, optimizer=optimizer,
                           train_epochs=train_epochs,
                           train_mb_size=train_mb_size, evaluator=evaluator,
-                          device=device)
+                          device=device, eval_every=eval_every)
         elif name == 'cumulative':
             return Cumulative(model=model, criterion=criterion,
                               optimizer=optimizer, train_epochs=train_epochs,
                               train_mb_size=train_mb_size, evaluator=evaluator,
-                              device=device)
+                              device=device, eval_every=eval_every)
         elif name == 'naive' or name == 'none':
             return Naive(model=model, criterion=criterion, optimizer=optimizer,
                          train_epochs=train_epochs, train_mb_size=train_mb_size,
-                         evaluator=evaluator, device=device)
+                         evaluator=evaluator, device=device,
+                         eval_every=eval_every)
         elif name == 'joint':
             return JointTraining(model=model, criterion=criterion,
                                  optimizer=optimizer, train_epochs=train_epochs,
                                  train_mb_size=train_mb_size,
-                                 evaluator=evaluator, device=device)
+                                 evaluator=evaluator, device=device,
+                                 eval_every=eval_every)
         elif name == 'er':
             return EmbeddingRegularization(mem_size=kwargs['mem_size'],
                                            penalty_weight=kwargs.get(
@@ -93,6 +100,7 @@ def get_trainer(name, tasks, sit: bool = False, **kwargs):
                                            train_epochs=train_epochs,
                                            train_mb_size=train_mb_size,
                                            evaluator=evaluator, device=device,
+                                           eval_every=eval_every,
                                            feature_extractor=model.feature_extractor,
                                            classifier=model.classifier)
         elif name == 'cml':
@@ -119,10 +127,9 @@ def get_trainer(name, tasks, sit: bool = False, **kwargs):
                                            criterion=criterion,
                                            train_mb_size=train_mb_size,
                                            train_epochs=train_epochs,
-                                           device=device,
+                                           device=device, eval_every=eval_every,
                                            sit=sit,
-                                           evaluator=evaluator,
-                                           eval_every=-1)
+                                           evaluator=evaluator)
         elif name == 'mcml':
             return MemoryContinualMetricLearning(model=model,
                                                  dev_split_size=kwargs.
@@ -134,9 +141,9 @@ def get_trainer(name, tasks, sit: bool = False, **kwargs):
                                                  train_mb_size=train_mb_size,
                                                  train_epochs=train_epochs,
                                                  device=device,
+                                                 eval_every=eval_every,
                                                  sit=sit,
-                                                 evaluator=evaluator,
-                                                 eval_every=-1)
+                                                 evaluator=evaluator)
         elif name == 'icarl':
             return ICaRL(feature_extractor=model.feature_extractor,
                          classifier=model.classifier,
@@ -147,7 +154,7 @@ def get_trainer(name, tasks, sit: bool = False, **kwargs):
                          criterion=criterion,
                          train_mb_size=train_mb_size,
                          train_epochs=train_epochs,
-                         device=device,
+                         device=device, eval_every=eval_every,
                          evaluator=evaluator)
         elif name == 'ssil':
             return SeparatedSoftmaxIncrementalLearning(
@@ -157,14 +164,39 @@ def get_trainer(name, tasks, sit: bool = False, **kwargs):
                 criterion=criterion,
                 train_mb_size=train_mb_size,
                 train_epochs=train_epochs,
-                device=device,
+                device=device, eval_every=eval_every,
                 evaluator=evaluator
             )
         elif name == 'cope':
             return CoPE(memory_size=kwargs['memory_size'],
                         model=model, criterion=criterion, optimizer=optimizer,
                         train_epochs=train_epochs, train_mb_size=train_mb_size,
-                        evaluator=evaluator, device=device)
+                        evaluator=evaluator, device=device,
+                        eval_every=eval_every)
+        elif name == 'der':
+            return DER(model=model, criterion=criterion,
+                       mem_size=kwargs['mem_size'],
+                       optimizer=optimizer,
+                       train_epochs=train_epochs,
+                       train_mb_size=train_mb_size,
+                       evaluator=evaluator, device=device,
+                       eval_every=eval_every,
+                       alpha=kwargs['alpha'],
+                       beta=kwargs['beta'])
+        elif name == 'routing':
+            return ContinuosRouting(model=model, criterion=criterion,
+                                    optimizer=optimizer,
+                                    train_epochs=train_epochs,
+                                    train_mb_size=train_mb_size,
+                                    evaluator=evaluator, device=device,
+                                    eval_every=eval_every,
+                                    past_task_reg=kwargs['past_task_reg'],
+                                    past_margin=kwargs['past_margin'],
+                                    warm_up_epochs=kwargs['warm_up_epochs'],
+                                    future_task_reg=kwargs['future_task_reg'],
+                                    future_margin=kwargs['future_margin'],
+                                    gamma=kwargs['gamma'],
+                                    memory_size=kwargs['memory_size'])
         else:
             assert False, f'CL method not found {name.lower()}'
 

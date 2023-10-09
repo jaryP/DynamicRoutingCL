@@ -7,9 +7,11 @@ import torch
 from avalanche.benchmarks.utils import AvalancheConcatDataset, AvalancheSubset
 from avalanche.benchmarks.utils.data_loader import GroupBalancedDataLoader, \
     ReplayDataLoader, TaskBalancedDataLoader
+from avalanche.core import SupervisedPlugin
 from avalanche.models import avalanche_forward
-from avalanche.training import BaseStrategy, ExperienceBalancedBuffer
-from avalanche.training.plugins import StrategyPlugin
+from avalanche.training import ExperienceBalancedBuffer
+from avalanche.training.templates import SupervisedTemplate
+from avalanche.training.plugins import EvaluationPlugin
 from torch import cosine_similarity, log_softmax
 from torch.optim import Adam
 from torch.utils.data import DataLoader
@@ -21,7 +23,7 @@ from methods.plugins.cml_utils import DistanceMemory, ClusteringMemory, \
     RandomMemory, FakeMerging
 
 
-class CentroidsMatching(StrategyPlugin):
+class CentroidsMatching(SupervisedPlugin):
     def __init__(self,
                  penalty_weight: float,
                  sit=False,
@@ -75,7 +77,7 @@ class CentroidsMatching(StrategyPlugin):
             else:
                 self.centroids_scaler = None
 
-    def before_training_exp(self, strategy: "BaseStrategy",
+    def before_training_exp(self, strategy: "SupervisedTemplate",
                             num_workers: int = 0, shuffle: bool = True,
                             **kwargs):
 
@@ -90,7 +92,7 @@ class CentroidsMatching(StrategyPlugin):
             batch_size=strategy.train_mb_size,
             shuffle=shuffle)
 
-    def calculate_centroids(self, strategy: BaseStrategy, dataset, model=None,
+    def calculate_centroids(self, strategy: SupervisedTemplate, dataset, model=None,
                             task=None):
         device = strategy.device
 
@@ -258,7 +260,7 @@ class CentroidsMatching(StrategyPlugin):
                                        tid=tid,
                                        model=strategy.model)
 
-    def before_train_dataset_adaptation(self, strategy: 'BaseStrategy',
+    def before_train_dataset_adaptation(self, strategy: 'SupervisedTemplate',
                                         **kwargs):
 
         self.past_model = deepcopy(strategy.model)
@@ -453,7 +455,7 @@ class CentroidsMatching(StrategyPlugin):
                 np.save(p, centroids)
 
 
-class MemoryCentroidsMatching(StrategyPlugin):
+class MemoryCentroidsMatching(EvaluationPlugin):
     def __init__(self,
                  sit,
                  memory_size: int = 200,
@@ -473,7 +475,7 @@ class MemoryCentroidsMatching(StrategyPlugin):
             max_size=memory_size,
             adaptive_size=True)
 
-    def before_training_exp(self, strategy: "BaseStrategy",
+    def before_training_exp(self, strategy: "SupervisedTemplate",
                             num_workers: int = 0, shuffle: bool = True,
                             **kwargs):
 
@@ -488,7 +490,7 @@ class MemoryCentroidsMatching(StrategyPlugin):
             batch_size=strategy.train_mb_size,
             shuffle=shuffle)
 
-    def calculate_centroids(self, strategy: BaseStrategy, dataset, model=None,
+    def calculate_centroids(self, strategy: SupervisedTemplate, dataset, model=None,
                             task=None):
         device = strategy.device
 

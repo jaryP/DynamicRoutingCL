@@ -9,6 +9,7 @@ from typing import List
 import hydra
 import numpy as np
 import torch
+import yaml
 from avalanche.benchmarks import data_incremental_benchmark
 from avalanche.evaluation.metric_results import MetricValue
 from avalanche.evaluation.metric_utils import phase_and_task, stream_type
@@ -119,10 +120,30 @@ from utils import get_optimizer
 #                   flush=True)
 
 @hydra.main(config_path="configs",
+            version_base='1.1',
             config_name="config")
 def avalanche_training(cfg: DictConfig):
     log = logging.getLogger(__name__)
     log.info(OmegaConf.to_yaml(cfg))
+    log.info(os.getcwd())
+
+    # check config
+    cfg_path = os.path.join(os.getcwd(), '.hydra', 'config.yaml')
+    if os.path.exists(cfg_path):
+        with open(cfg_path, 'r') as f:
+            past_cfg = yaml.safe_load(f)
+
+            keys_set = set([k for k in past_cfg.keys() if k != 'device'])
+            b = keys_set == set([k for k in cfg.keys() if k != 'device'])
+            assert b, (f'You are launching an experiment having output path {os.getcwd()}, '
+                                     f'but the experiment config and the one saved in the folder have not the same keys.')
+
+            b = all([past_cfg[k] == cfg[k] for k in keys_set])
+
+            assert b, (f'You are launching an experiment having output path {os.getcwd()}, '
+                                     f'but the experiment config and the one saved in the folder not equal: {past_cfg - cfg}')
+
+    device = cfg.get('device', 'cpu')
 
     scenario = cfg['scenario']
     dataset = scenario['dataset']
@@ -135,8 +156,8 @@ def avalanche_training(cfg: DictConfig):
 
     # seed = scenario.get('seed', None)
 
-    model = cfg['model']
-    model_name = model['name']
+    model_cfg = cfg['model']
+    model_name = model_cfg['name']
 
     method = cfg['method']
     plugin_name = method['name'].lower()
@@ -145,7 +166,9 @@ def avalanche_training(cfg: DictConfig):
     training = cfg['training']
     epochs = training['epochs']
     batch_size = training['batch_size']
-    device = training['device']
+    # device = training['device']
+
+    eval_every = training.get('eval_every', -1)
 
     num_workers = training.get('num_workers', 0)
     pin_memory = training.get('pin_memory', True)
@@ -177,11 +200,11 @@ def avalanche_training(cfg: DictConfig):
 
     base_path = os.getcwd()
 
-    cil = not task_incremental_learning
+    is_cil = not task_incremental_learning
     task_incremental_learning = task_incremental_learning if plugin_name != 'cml' \
         else True
 
-    force_sit = False
+    force_sit = True if method['name'] == 'der' else False
 
     for exp_n in range(1, n_experiments + 1):
         log.info(f'Starting experiment {exp_n} (of {n_experiments})')
@@ -199,11 +222,11 @@ def avalanche_training(cfg: DictConfig):
         results_path = os.path.join(experiment_path, 'results.json')
         train_results_path = os.path.join(experiment_path, 'train_results.json')
 
-        if plugin_name in ['icarl', 'cope', 'ssil', 'moe'] and not cil:
-            assert cil, 'ICarL , CoPE, and ssil only work under Class Incremental Scenario'
+        if plugin_name in ['icarl', 'cope', 'ssil', 'moe'] and not is_cil:
+            assert is_cil, 'ICarL , CoPE, and ssil only work under Class Incremental Scenario'
 
-        if plugin_name in ['er'] and cil:
-            assert cil, 'ER only work under Task Incremental Scenario'
+        if plugin_name in ['er'] and is_cil:
+            assert is_cil, 'ER only work under Task Incremental Scenario'
 
         tasks = get_dataset_nc_scenario(name=dataset,
                                         scenario=scenario_name,
@@ -232,19 +255,26 @@ def avalanche_training(cfg: DictConfig):
 
             img, _, _ = tasks.train_stream[0].dataset[0]
 
+            if method['name'] == 'der':
+                assert 'head_classes' in model_cfg, ('Whn using DER you must specify '
+                                                     'the head dimension of the model, '
+                                                     'by setting head_classes parameter'
+                                                     'in the config file.')
+
             model = get_cl_model(model_name=model_name,
                                  input_shape=tuple(img.shape),
                                  method_name=plugin_name,
-                                 sit=cil)
+                                 is_class_incremental_learning=is_cil,
+                                 **model_cfg)
 
             file_path = os.path.join(experiment_path, 'results.txt')
             output_file = open(file_path, 'w')
 
             eval_plugin = EvaluationPlugin(
-                accuracy_metrics(minibatch=False, epoch_running=False,
-                                 stream=True, trained_experience=True),
+                accuracy_metrics(stream=True,
+                                 trained_experience=True, experience=True),
                 bwt_metrics(experience=True, stream=True),
-                timing_metrics(minibatch=True, epoch=True, experience=False),
+                # timing_metrics(minibatch=True, epoch=True, experience=False),
                 loggers=[
                     TextLogger(),
                     # StrategyLogger(),
@@ -262,7 +292,7 @@ def avalanche_training(cfg: DictConfig):
 
             trainer = get_trainer(**method,
                                   tasks=tasks,
-                                  sit=cil)
+                                  sit=is_cil)
 
             strategy = trainer(model=model,
                                criterion=criterion,
@@ -270,6 +300,7 @@ def avalanche_training(cfg: DictConfig):
                                train_epochs=epochs
                                if method['name'].lower() != 'cope' else 1,
                                train_mb_size=batch_size,
+                               eval_every=eval_every,
                                evaluator=eval_plugin,
                                device=device)
 

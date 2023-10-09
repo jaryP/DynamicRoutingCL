@@ -1,14 +1,15 @@
 from copy import deepcopy
 
 import torch
-from avalanche.training import ClassBalancedBuffer, BaseStrategy
-from avalanche.training.plugins import StrategyPlugin
+from avalanche.core import SupervisedPlugin
+from avalanche.training import ClassBalancedBuffer
+from avalanche.training.templates import SupervisedTemplate
 from torch import softmax, log_softmax
 from torch.nn.functional import kl_div
 from torch.utils.data import DataLoader
 
 
-class SeparatedSoftmax(StrategyPlugin):
+class SeparatedSoftmax(SupervisedPlugin):
     def __init__(self,
                  mem_size: int):
 
@@ -23,14 +24,14 @@ class SeparatedSoftmax(StrategyPlugin):
     def after_training_exp(self, strategy, **kwargs):
         self.memory.update(strategy)
         self.seen_classes.append(strategy.experience.classes_in_this_experience)
-
-    def before_train_dataset_adaptation(self, strategy: 'BaseStrategy',
+    
+    def before_train_dataset_adaptation(self, strategy: 'SupervisedTemplate',
                                         **kwargs):
 
         self.past_model = deepcopy(strategy.model)
         self.past_model.eval()
 
-    def before_backward(self, strategy: 'BaseStrategy', **kwargs):
+    def before_backward(self, strategy: 'SupervisedTemplate', **kwargs):
         if strategy.clock.train_exp_counter > 0:
             classes = strategy.experience.classes_in_this_experience
             n_classes = len(classes)

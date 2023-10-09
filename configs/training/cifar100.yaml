@@ -1,0 +1,3 @@
+epochs: 10
+batch_size: 16
+device: 0

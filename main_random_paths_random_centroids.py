@@ -919,12 +919,23 @@ class CentroidsMatching(SupervisedPlugin):
 
 class Trainer(SupervisedTemplate):
     def __init__(self, model,
-                 optimizer: Optimizer, criterion,
-                 train_mb_size: int = 1, train_epochs: int = 1,
-                 eval_mb_size: int = None, device=None,
+                 optimizer: Optimizer,
+                 memory_size: int,
+                 train_mb_size: int = 1,
+                 train_epochs: int = 1,
+                 past_task_reg=1,
+                 past_margin=0.2,
+                 warm_up_epochs=-1,
+                 future_task_reg=1,
+                 future_margin=3,
+                 gamma=1,
+                 eval_mb_size: int = None,
+                 device=None,
                  plugins=None,
                  batch_size_mem=None,
-                 evaluator: EvaluationPlugin = default_evaluator, eval_every=-1,
+                 criterion=None,
+                 evaluator: EvaluationPlugin = default_evaluator,
+                 eval_every=-1,
                  ):
 
         self.tasks_nclasses = dict()
@@ -938,22 +949,22 @@ class Trainer(SupervisedTemplate):
         # Past task loss weight
         self.alpha = 1
 
-        self.past_task_reg = 0.5
-        self.past_margin = 0.2
-        self.warm_up_epochs = 0
+        self.past_task_reg = past_task_reg
+        self.past_margin = past_margin
+        self.warm_up_epochs = warm_up_epochs
 
-        self.future_task_reg = 0.1
-        self.future_margin = 2
+        self.future_task_reg = future_task_reg
+        self.future_margin = future_margin
 
         # Past task features weight
         self.delta = 0
 
         # Past task logits weight
-        self.gamma = 0.5
+        self.gamma = gamma
         self.logit_regularization = 'mse'
         self.tau = 1
 
-        self.memory_size = 1000
+        self.memory_size = memory_size
         rp = CentroidsMatching()
 
         if batch_size_mem is None:
@@ -1481,7 +1492,7 @@ class Trainer(SupervisedTemplate):
         tid = self.experience.current_experience
 
         if not self.is_training:
-            if isinstance(self.model, MoELogits):
+            if isinstance(self.model, RoutingModel):
                 loss_val = nn.functional.cross_entropy(self.mb_output, self.mb_y)
             else:
                 log_p_y = torch.log_softmax(self.mb_output, dim=1)
@@ -1499,7 +1510,7 @@ class Trainer(SupervisedTemplate):
             pred = torch.cat((self.mb_output, self.mb_future_logits), 1)
 
         if len(self.past_dataset) == 0:
-            if isinstance(self.model, MoELogits):
+            if isinstance(self.model, RoutingModel):
                 loss_val = nn.functional.cross_entropy(pred, self.mb_y, label_smoothing=0)
             else:
                 log_p_y = torch.log_softmax(pred, dim=1)
@@ -1521,8 +1532,9 @@ class Trainer(SupervisedTemplate):
                 # w = float(self.clock.train_exp_epochs / self.warm_up_epochs >= 1)
                 w = self.clock.train_exp_epochs / self.warm_up_epochs
 
-            if w >= 1:
-                mx = neg_pred1.max(-1).values.detach()
+            if w >= 1 and self.past_margin > 0 and self.past_task_reg > 0:
+                # mx = neg_pred1.max(-1).values.detach()
+                mx = neg_pred1.max(-1).values
                 mx_current_classes = pred1[range(len(pred1)), y1]
 
                 margin_dist = torch.maximum(torch.zeros_like(mx), mx - mx_current_classes + self.past_margin)
@@ -1532,7 +1544,7 @@ class Trainer(SupervisedTemplate):
 
                 past_reg = past_reg * self.past_task_reg
 
-            if isinstance(self.model, MoELogits):
+            if isinstance(self.model, RoutingModel):
                 loss1 = nn.functional.cross_entropy(pred1, y1)
                 loss2 = nn.functional.cross_entropy(pred2, y2)
             else:
@@ -1543,10 +1555,11 @@ class Trainer(SupervisedTemplate):
 
             loss_val = loss1 + self.alpha * loss2
 
-        if self.future_task_reg > 0:
+        if self.future_task_reg > 0 and self.future_margin > 0:
             future_logits = self.mb_future_logits
             future_mx = future_logits.max(-1).values
             current_mx = self.mb_output.max(-1).values
+            # current_mx = self.mb_output[range(len(future_mx)), self.mb_y]
 
             reg = current_mx - future_mx - self.future_margin
             reg = torch.maximum(torch.zeros_like(reg), reg)
@@ -1566,10 +1579,14 @@ class Trainer(SupervisedTemplate):
                     x, y = (self.mb_x[ self.current_mb_size:],
                             self.mb_y[ self.current_mb_size:])
                     curr_logits = self.mb_output[ self.current_mb_size:]
-                    curr_features = self.mb_features[ self.current_mb_size:]
+                    # curr_features = self.mb_features[ self.current_mb_size:]
+
+                    curr_logits = pred[ self.current_mb_size:]
+                    # curr_features = self.mb_features[ self.current_mb_size:]
 
                 with torch.no_grad():
-                    past_logits, past_features, _, _ = self.past_model(x)
+                    past_logits, past_features, _, _ = self.past_model(x, other_paths=self.model.current_random_paths)
+                    # past_logits, past_features, _, _ = self.past_model(x, other_paths=None)
 
                 classes = [self.tasks_nclasses[t.item()] for t in
                            self.mb_task_id]
@@ -1716,8 +1733,11 @@ class Trainer(SupervisedTemplate):
         return loss
 
 
-class MoELogits(MultiTaskModule):
+class RoutingModel(MultiTaskModule):
     def __init__(self,
+                 dimension,
+                 n_blocks_in_layer,
+                 block_type,
                  cumulative=False,
                  freeze_past_tasks=False,
                  freeze_future_logits=True,
@@ -1725,9 +1745,12 @@ class MoELogits(MultiTaskModule):
                  future_paths_to_sample=5,
                  sample_wise_future_sampling=False,
                  path_selection_strategy='random',
-                 prediction_mode='task'):
+                 prediction_mode='task', **kwargs):
 
         super().__init__()
+
+        assert dimension in ['tiny', 'small']
+        assert block_type in ['conv', 'small']
 
         self.forced_future = 0
 
@@ -1755,9 +1778,10 @@ class MoELogits(MultiTaskModule):
 
         self.layers = nn.ModuleList()
 
-        self.layers.append(BlockRoutingLayer(3, 32, project_dim=32, get_average_features=cumulative))
-        self.layers.append(BlockRoutingLayer(32, 64, project_dim=64, get_average_features=cumulative))
-        self.layers.append(BlockRoutingLayer(64, 128, project_dim=128, get_average_features=cumulative))
+        if dimension == 'tiny':
+            self.layers.append(BlockRoutingLayer(3, 32, n_blocks=n_blocks_in_layer, block_type=block_type))
+            self.layers.append(BlockRoutingLayer(32, 64, n_blocks=n_blocks_in_layer, block_type=block_type))
+            self.layers.append(BlockRoutingLayer(64, 128, project_dim=128, n_blocks=n_blocks_in_layer, block_type=block_type))
 
         self.mx = nn.Sequential(nn.ReLU())
 
@@ -1878,7 +1902,7 @@ class MoELogits(MultiTaskModule):
             with torch.enable_grad():
                 for x in xs:
                     past_paths = list(self.assigned_paths.values())
-                    features, _ = self.features(x, unassigned_path_to_use=past_paths)
+                    features, _ = self.features(x, paths_to_use=past_paths)
                     logits = []
 
                     for i, (_, v) in enumerate(past_paths):
@@ -1896,7 +1920,7 @@ class MoELogits(MultiTaskModule):
                     for i in range(0, len(self.available_paths), 10):
                         pts = self.available_paths[i:i+10]
 
-                        features, _ = self.features(x, unassigned_path_to_use=pts)
+                        features, _ = self.features(x, paths_to_use=pts)
                         logits = []
 
                         for i, (_, v) in enumerate(pts):
@@ -1965,7 +1989,7 @@ class MoELogits(MultiTaskModule):
 
         print(self.assigned_paths)
 
-    def forward(self,
+    def _forward(self,
                 x: torch.Tensor,
                 task_labels: torch.Tensor = None,
                 **kwargs) \
@@ -1987,7 +2011,7 @@ class MoELogits(MultiTaskModule):
         if self.sample_wise_future_sampling and self.use_future and not self.forced_future > 0:
             logits = []
 
-            features, all_features = self.features(x, unassigned_path_to_use=base_paths)
+            features, all_features = self.features(x, paths_to_use=base_paths)
 
             for i, (_,v) in enumerate(base_paths):
                 l = self.centroids[str(v)](features[:, i])
@@ -2009,7 +2033,7 @@ class MoELogits(MultiTaskModule):
 
                     random_paths = [self.available_paths[p] for p in sampled_paths]
 
-                    f, _ = self.features(_x[None], unassigned_path_to_use=random_paths)
+                    f, _ = self.features(_x[None], paths_to_use=random_paths)
 
                     lg = []
 
@@ -2042,7 +2066,7 @@ class MoELogits(MultiTaskModule):
                 base_paths += [self.available_paths[p] for p in sampled_paths]
 
             all_paths = base_paths + random_paths
-            features, all_features = self.features(x, unassigned_path_to_use=all_paths)
+            features, all_features = self.features(x, paths_to_use=all_paths)
 
             # self.internal_features = list(zip(*all_features))
 
@@ -2094,7 +2118,7 @@ class MoELogits(MultiTaskModule):
 
         return logits, features, random_logits, random_features
 
-    def features(self, x, *,
+    def _features(self, x, *,
                  unassigned_path_to_use=None, **kwargs):
 
         if unassigned_path_to_use is not None:
@@ -2137,6 +2161,175 @@ class MoELogits(MultiTaskModule):
 
         return logits, feats
 
+    def forward(self,
+                x: torch.Tensor,
+                task_labels = None,
+                other_paths: list = None,
+                **kwargs) \
+            -> Tuple[
+                Tensor, Union[Tensor, Any], Optional[None], Optional[None]]:
+
+        base_paths = list(self.assigned_paths.values())
+        random_paths = []
+
+        random_features = None
+        random_logits = None
+
+        features = None
+        logits = None
+
+        if self.sample_wise_future_sampling and self.use_future and not self.forced_future > 0:
+            logits = []
+
+            features, all_features = self.features(x, paths_to_use=base_paths)
+
+            for i, (_,v) in enumerate(base_paths):
+                l = self.centroids[str(v)](features[:, i])
+
+                if self.freeze_past_tasks and str(v) in self.centroids_scaler:
+                    l = l / self.centroids_scaler[str(v)]
+                logits.append(l)
+
+            logits = torch.cat(logits, -1)
+
+            if self.training:
+                random_features = []
+                random_logits = []
+
+                for _x in x:
+                    sampled_paths = np.random.choice(
+                        np.arange(len(self.available_paths)),
+                        self.future_paths_to_sample, replace=True)
+
+                    random_paths = [self.available_paths[p] for p in sampled_paths]
+
+                    f, _ = self.features(_x[None], paths_to_use=random_paths)
+
+                    lg = []
+
+                    for i, (_, v) in enumerate(random_paths):
+                        l = self.centroids[str(v)](f[:, i])
+
+                        if self.freeze_past_tasks and str(
+                                v) in self.centroids_scaler:
+                            l = l / self.centroids_scaler[str(v)]
+                        lg.append(l)
+
+                    lg = torch.cat(lg, -1)
+                    random_logits.append(lg)
+                    random_features.append(f)
+
+                random_logits = torch.cat(random_logits, 0)
+                random_features = torch.cat(random_features, 0)
+
+        else:
+            if self.training and self.use_future:
+                sampled_paths = np.random.choice(
+                    np.arange(len(self.available_paths)),
+                    self.future_paths_to_sample, replace=True)
+                random_paths = [self.available_paths[p] for p in sampled_paths]
+
+            if self.forced_future > 0:
+                sampled_paths = np.random.choice(
+                    np.arange(len(self.available_paths)),
+                    self.forced_future, replace=True)
+                random_paths += [self.available_paths[p] for p in sampled_paths]
+
+            self.current_random_paths = random_paths
+            # all_paths = base_paths + random_paths
+
+            if len(base_paths) > 0:
+                features, logits, _ = self.features(x, paths_to_use=base_paths)
+
+            if len(random_paths) > 0:
+                random_features, random_logits, _ = (
+                    self.features(x, paths_to_use=random_paths))
+
+            if features is None:
+                features, logits = random_features, random_logits
+                random_features, random_logits = None, None
+            elif self.forced_future > 0:
+                features = torch.cat((features, random_features), 1)
+                logits = torch.cat((logits, random_logits), 1)
+                random_features, random_logits = None, None
+
+            if other_paths is not None and len(other_paths) > 0:
+                f, l, _ = self.features(x, paths_to_use=other_paths)
+                features = torch.cat((features, f), 1)
+                logits = torch.cat((logits, l), 1)
+
+            # features, all_features = self.features(x, unassigned_path_to_use=all_paths)
+            #
+            # # if len(base_paths) > 0:
+            # #     if len(random_paths) > 0:
+            # #         random_logits = logits[:, -len(random_paths):]
+            # #         random_features = features[:, -len(random_paths):]
+            # #
+            # #     features = features[:, :len(base_paths)]
+            # #     logits = logits[:, :len(base_paths)]
+            #
+            # if len(base_paths) > 0 and len(random_paths) > 0:
+            #     random_logits = logits[:, -len(random_paths):]
+            #     random_features = features[:, -len(random_paths):]
+            #
+            #     features = features[:, :-len(random_paths)]
+            #     logits = logits[:, :-len(random_paths)]
+
+        return logits, features, random_logits, random_features
+
+    def features(self, x, *, paths_to_use=None, **kwargs):
+        if paths_to_use is not None:
+            if isinstance(paths_to_use, Sequence):
+                if any(isinstance(v, int) for v in paths_to_use):
+                    assert False
+            #     paths_to_use = list(paths_to_use)
+            # elif (isinstance(paths_to_use, list)
+            #       and any(isinstance(v, int) for v in paths_to_use)):
+            #
+            #     assert False
+            elif paths_to_use == 'all':
+                paths_to_use = self.available_paths
+
+            to_iter = paths_to_use
+        else:
+            to_iter = self.assigned_paths.values()
+
+        feats = []
+
+        paths = list(zip(*[p for p, _ in to_iter]))
+        paths_iterable = iter(paths)
+        _x = [x] * len(paths[0])
+
+        for l in self.layers[:-1]:
+            _p = next(paths_iterable)
+            _x, f = l(_x, _p)
+            # _x = _x.relu()
+            feats.append(f)
+
+        _x, f = self.layers[-1](_x, next(paths_iterable))
+        if self.cumulative:
+           feats.append(f)
+        else:
+            feats.append(_x)
+
+        if self.cumulative:
+            feats = [torch.cat(l, -1 )for l in list(zip(*feats))]
+            features = torch.stack(feats, 1)
+        else:
+            features = torch.stack(f, 1)
+            # logits = torch.stack(f, 1).relu()
+
+        logits = []
+        for i, (_, v) in enumerate(paths_to_use):
+            l = self.centroids[str(v)](features[:, i])
+
+            if self.freeze_past_tasks and str(v) in self.centroids_scaler:
+                l = l / self.centroids_scaler[str(v)]
+            logits.append(l)
+
+        logits = torch.cat(logits, 1)
+
+        return features, logits, feats
 
 torch.manual_seed(0)
 # random.seed(0)
@@ -2160,7 +2353,8 @@ def train(train_stream, test_stream, theta=1, train_epochs=1,
           fine_tune_epochs=1):
     # complete_model = MoECentroids()
 
-    complete_model = MoELogits()
+    complete_model = RoutingModel(n_blocks_in_layer=10, block_type='conv',
+                                  dimension='tiny')
 
     criterion = CrossEntropyLoss()
 
@@ -2180,7 +2374,10 @@ def train(train_stream, test_stream, theta=1, train_epochs=1,
     # colors = distinctipy.get_colors(len(train_stream) + 1)
 
     trainer = Trainer(model=complete_model, optimizer=optimizer,
+                      memory_size=200,
+                      past_margin=0.1, future_margin=5,
                       train_mb_size=32, eval_every=5,
+                      gamma=10,
                       eval_mb_size=32, evaluator=eval_plugin,
                       criterion=criterion, device=device,
                       train_epochs=train_epochs)
@@ -2347,7 +2544,7 @@ if __name__ == '__main__':
     train_tasks = cifar10_train_stream
     test_tasks = cifar10_test_stream
 
-    model = train(train_epochs=20,
+    model = train(train_epochs=10,
                   fine_tune_epochs=0,
                   train_stream=train_tasks,
                   test_stream=test_tasks)

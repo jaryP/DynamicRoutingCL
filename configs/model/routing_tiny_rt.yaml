@@ -1,0 +1,7 @@
+name: routing
+n_blocks_in_layer: 5
+block_type: 'conv'
+future_paths_to_sample: 5
+path_selection_strategy: 'random'
+prediction_mode: 'task'
+dimension: 'tiny'

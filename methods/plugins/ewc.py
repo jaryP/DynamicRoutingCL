@@ -3,15 +3,15 @@ from typing import Dict, Tuple
 import warnings
 
 import torch
+from avalanche.core import SupervisedPlugin
 from torch import Tensor
 from torch.utils.data import DataLoader
 
 from avalanche.models.utils import avalanche_forward
-from avalanche.training.plugins.strategy_plugin import StrategyPlugin
 from avalanche.training.utils import copy_params_dict, zerolike_params_dict
 
 
-class EWCCustomPlugin(StrategyPlugin):
+class EWCCustomPlugin(SupervisedPlugin):
     """
     Elastic Weight Consolidation (EWC) plugin.
     EWC computes importance of each weight at the end of training on current

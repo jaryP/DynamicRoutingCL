@@ -8,7 +8,7 @@ from torch import nn
 import torch.nn.functional as F
 
 from models import resnet20, resnet32, custom_vgg
-from models.utils import CombinedModel, CustomMultiHeadClassifier
+from models.utils import AvalanceCombinedModel, CustomMultiHeadClassifier
 
 
 def get_backbone(name: str, channels: int = 3):
@@ -175,6 +175,6 @@ def get_cl_model(model_name: str,
                     classifier = CustomMultiHeadClassifier(size, heads_generator,
                                                            cml_out_features)
 
-    model = CombinedModel(backbone, classifier)
+    model = AvalanceCombinedModel(backbone, classifier)
 
     return model

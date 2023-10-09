@@ -1,11 +1,14 @@
 import torch
 from avalanche.benchmarks.utils.data_loader import ReplayDataLoader
-from avalanche.training import BaseStrategy, ClassBalancedBuffer
-from avalanche.training.plugins import StrategyPlugin
+from avalanche.core import SupervisedPlugin
+from avalanche.training import ClassBalancedBuffer
 from methods.plugins.cope_utils import PrototypeScheme, PPPloss
 
+from avalanche.training.templates import SupervisedTemplate
+from avalanche.training.plugins import EvaluationPlugin
 
-class ContinualPrototypeEvolution(StrategyPlugin):
+
+class ContinualPrototypeEvolution(SupervisedPlugin):
     def __init__(self,
                  p_mode='batch_momentum_incr',
                  p_momentum=0.9,
@@ -51,7 +54,7 @@ class ContinualPrototypeEvolution(StrategyPlugin):
         #     else:
         #         self.centroids_scaler = None
 
-    def before_training_exp(self, strategy: "BaseStrategy",
+    def before_training_exp(self, strategy: "SupervisedTemplate",
                             num_workers: int = 0, shuffle: bool = True,
                             **kwargs):
 
@@ -94,7 +97,7 @@ class ContinualPrototypeEvolution(StrategyPlugin):
 
         return loss
 
-    def after_forward(self, strategy: 'BaseStrategy', **kwargs):
+    def after_forward(self, strategy: 'SupervisedTemplate', **kwargs):
 
         self.pp_scheme.initialize_prototypes(strategy.mb_output,
                                              strategy.experience.classes_in_this_experience)
@@ -108,7 +111,7 @@ class ContinualPrototypeEvolution(StrategyPlugin):
             replay_mask=~mask,
             pre_loss=True)
 
-    def after_training_exp(self, strategy: 'BaseStrategy', **kwargs):
+    def after_training_exp(self, strategy: 'SupervisedTemplate', **kwargs):
         self.memory.update(strategy)
 
         tid = strategy.experience.current_experience

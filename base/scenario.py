@@ -1,30 +1,29 @@
 from typing import Optional
 from avalanche.benchmarks import nc_benchmark
 
-from avalanche.benchmarks.classic.ccifar10 import _get_cifar10_dataset, \
-    _default_cifar10_train_transform, _default_cifar10_eval_transform
+from avalanche.benchmarks.classic.ccifar10 import _default_cifar10_train_transform, _default_cifar10_eval_transform
 
-from avalanche.benchmarks.classic.ccifar100 import _get_cifar100_dataset, \
-    _default_cifar100_train_transform, _default_cifar100_eval_transform
+from avalanche.benchmarks.classic.ccifar100 import _default_cifar100_train_transform, _default_cifar100_eval_transform
 
-from avalanche.benchmarks.classic.ctiny_imagenet import \
-    _get_tiny_imagenet_dataset
+from avalanche.benchmarks.classic.ctiny_imagenet import  _get_tiny_imagenet_dataset
 
 from avalanche.benchmarks.classic.ctiny_imagenet import \
     _default_train_transform as _default_tiny_imagenet_train_transform
 from avalanche.benchmarks.classic.ctiny_imagenet import \
     _default_eval_transform as _default_tiny_imagenet_eval_transform
+from avalanche.benchmarks.datasets.external_datasets import get_cifar10_dataset, \
+    get_cifar100_dataset
 
 
 def get_dataset_by_name(name: str, root: str = None):
     name = name.lower()
 
     if name == 'cifar10':
-        train_set, test_set = _get_cifar10_dataset(root)
+        train_set, test_set = get_cifar10_dataset(root)
         train_t = _default_cifar10_train_transform
         test_t = _default_cifar10_eval_transform
     elif name == 'cifar100':
-        train_set, test_set = _get_cifar100_dataset(root)
+        train_set, test_set = get_cifar100_dataset(root)
         train_t = _default_cifar100_train_transform
         test_t = _default_cifar100_eval_transform
     elif name == 'tinyimagenet':

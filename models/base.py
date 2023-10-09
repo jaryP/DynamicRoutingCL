@@ -7,11 +7,13 @@ from avalanche.models import MultiHeadClassifier, IncrementalClassifier
 from torch import nn
 import torch.nn.functional as F
 
+from main_random_paths_random_centroids import RoutingModel
 from models import resnet20, resnet32, custom_vgg
-from models.utils import CombinedModel, CustomMultiHeadClassifier
+from models.utils import AvalanceCombinedModel, CustomMultiHeadClassifier, \
+    PytorchCombinedModel
 
 
-def get_backbone(name: str, channels: int = 3):
+def get_backbone(name: str, channels: int = 3, **kwargs):
     name = name.lower()
 
     if 'vgg' in name:
@@ -94,10 +96,16 @@ def get_backbone(name: str, channels: int = 3):
 def get_cl_model(model_name: str,
                  method_name: str,
                  input_shape: Tuple[int, int, int],
-                 sit: bool = False,
+                 is_class_incremental_learning: bool = False,
                  cml_out_features: int = None,
-                 is_stream: bool = False):
-    backbone = get_backbone(model_name, channels=input_shape[0])
+                 is_stream: bool = False,
+                 head_classes=None,
+                 **kwargs):
+
+    if model_name == 'routing':
+        return RoutingModel(**kwargs)
+
+    backbone = get_backbone(channels=input_shape[0], **kwargs)
 
     if method_name in ['cope', 'mcml']:
         return backbone
@@ -124,24 +132,28 @@ def get_cl_model(model_name: str,
 
         return Wrapper()
 
-    if is_stream or method_name == 'icarl':
-        classifier = IncrementalClassifier(size)
+    if head_classes is not None:
+        classifier = nn.Sequential(nn.Flatten(1), nn.Linear(size, head_classes))
+        return PytorchCombinedModel(backbone, classifier)
     else:
-        if method_name == 'er':
-            classifier = CustomMultiHeadClassifier(size, heads_generator)
+        if is_stream or method_name == 'icarl':
+            classifier = IncrementalClassifier(size)
         else:
-            if method_name != 'cml':
-                if sit:
-                    classifier = IncrementalClassifier(size)
-                else:
-                    classifier = MultiHeadClassifier(size)
+            if method_name == 'er':
+                classifier = CustomMultiHeadClassifier(size, heads_generator)
             else:
-                if cml_out_features is None:
-                    cml_out_features = 128
+                if method_name != 'cml':
+                    if is_class_incremental_learning:
+                        classifier = IncrementalClassifier(size)
+                    else:
+                        classifier = MultiHeadClassifier(size)
+                else:
+                    if cml_out_features is None:
+                        cml_out_features = 128
 
-                classifier = CustomMultiHeadClassifier(size, heads_generator,
-                                                       cml_out_features)
+                    classifier = CustomMultiHeadClassifier(size, heads_generator,
+                                                           cml_out_features)
 
-    model = CombinedModel(backbone, classifier)
+    model = AvalanceCombinedModel(backbone, classifier)
 
     return model
