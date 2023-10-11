@@ -44,31 +44,25 @@ def get_trainer(name, tasks, sit: bool = False, **kwargs):
                        evaluator=evaluator, device=device,
                        eval_every=eval_every)
         elif name == 'ewc':
-            return CustomEWC(ewc_lambda=kwargs['ewc_lambda'],
-                             mode='separate',
-                             decay_factor=kwargs.get('decay_factor', None),
-                             keep_importance_data=kwargs.get(
-                                 'keep_importance_data',
-                                 False),
-                             model=model, criterion=criterion,
-                             optimizer=optimizer,
-                             train_epochs=train_epochs,
-                             train_mb_size=train_mb_size,
-                             evaluator=evaluator, device=device,
-                             eval_every=eval_every)
+            return EWC(ewc_lambda=kwargs['lambda'],
+                       mode='separate',
+                       keep_importance_data=kwargs.get('keep_importance_data', False),
+                       model=model, criterion=criterion,
+                       optimizer=optimizer,
+                       train_epochs=train_epochs,
+                       train_mb_size=train_mb_size,
+                       evaluator=evaluator, device=device,
+                       eval_every=eval_every)
         elif name == 'oewc':
-            return CustomEWC(ewc_lambda=kwargs['ewc_lambda'],
-                             mode='online',
-                             decay_factor=kwargs.get('decay_factor', 1),
-                             keep_importance_data=kwargs.get(
-                                 'keep_importance_data',
-                                 False),
-                             model=model, criterion=criterion,
-                             optimizer=optimizer,
-                             train_epochs=train_epochs,
-                             train_mb_size=train_mb_size,
-                             evaluator=evaluator, device=device,
-                             eval_every=eval_every)
+            return EWC(ewc_lambda=kwargs['lambda'],
+                       mode='online',
+                       keep_importance_data=kwargs.get('keep_importance_data', False),
+                       model=model, criterion=criterion,
+                       optimizer=optimizer,
+                       train_epochs=train_epochs,
+                       train_mb_size=train_mb_size,
+                       evaluator=evaluator, device=device,
+                       eval_every=eval_every)
         elif name == 'replay':
             return Replay(mem_size=kwargs['mem_size'], model=model,
                           criterion=criterion, optimizer=optimizer,

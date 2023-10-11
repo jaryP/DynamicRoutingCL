@@ -100,6 +100,7 @@ def get_cl_model(model_name: str,
                  cml_out_features: int = None,
                  is_stream: bool = False,
                  head_classes=None,
+                 masking=False,
                  **kwargs):
 
     if model_name == 'routing':
@@ -144,14 +145,16 @@ def get_cl_model(model_name: str,
             else:
                 if method_name != 'cml':
                     if is_class_incremental_learning:
-                        classifier = IncrementalClassifier(size)
+                        classifier = IncrementalClassifier(size,
+                                                           masking=masking)
                     else:
-                        classifier = MultiHeadClassifier(size)
+                        classifier = MultiHeadClassifier(size, masking=masking)
                 else:
                     if cml_out_features is None:
                         cml_out_features = 128
 
-                    classifier = CustomMultiHeadClassifier(size, heads_generator,
+                    classifier = CustomMultiHeadClassifier(size,
+                                                           heads_generator,
                                                            cml_out_features)
 
     model = AvalanceCombinedModel(backbone, classifier)

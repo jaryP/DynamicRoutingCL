@@ -1,4 +1,7 @@
 from typing import Optional
+
+import numpy as np
+import torch
 from avalanche.benchmarks import nc_benchmark
 
 from avalanche.benchmarks.classic.ccifar10 import _default_cifar10_train_transform, _default_cifar10_eval_transform
@@ -36,15 +39,9 @@ def get_dataset_by_name(name: str, root: str = None):
     return train_set, test_set, train_t, test_t
 
 
-def get_dataset_nc_scenario(name: str,
-                            scenario: str,
-                            n_tasks: int,
-                            til: bool,
-                            shuffle: bool = True,
-                            seed: Optional[int] = None,
-                            force_sit=False,
-                            method_name=None,
-                            sit_with_labels=False):
+def get_dataset_nc_scenario(name: str, n_tasks: int, til: bool,
+                            shuffle: bool = True, seed: Optional[int] = None,
+                            force_sit=False, method_name=None, dev_split=None):
 
     name = name.lower()
 
@@ -54,6 +51,21 @@ def get_dataset_nc_scenario(name: str,
         assert False, f'Dataset {name} not found.'
 
     train_split, test_split, train_t, test_t = r
+
+    if dev_split is not None:
+        idx = np.arange(len(train_split))
+        np.random.RandomState(0).shuffle(idx)
+
+        if isinstance(dev_split, int):
+            dev_i = dev_split
+        else:
+            dev_i = int(len(idx) * dev_split)
+
+        dev_idx = idx[:dev_i]
+        train_idx = idx[dev_i:]
+
+        test_split= torch.utils.data.Subset(train_split, dev_idx)
+        train_split = torch.utils.data.Subset(train_split, train_idx)
 
     if method_name == 'cope':
         return nc_benchmark(

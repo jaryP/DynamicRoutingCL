@@ -1,5 +1,5 @@
-experiments: 5
+experiments: 1
 save: Yes
 load: Yes
 plot: Yes
-eval_every: 1
+dev_split: 0.1

@@ -245,10 +245,8 @@ class MemoryContinualMetricLearning(SupervisedTemplate):
             dev_idx = idx[:dev_i]
             train_idx = idx[dev_i:]
 
-            self.experience.dataset = AvalancheSubset(dataset.train(),
-                                                      train_idx)
-            self.experience.dev_dataset = AvalancheSubset(dataset.eval(),
-                                                          dev_idx)
+            self.experience.dataset = dataset.train().subset(train_idx)
+            self.experience.dev_dataset = dataset.eval().subset(dev_idx)
 
         self.adapted_dataset = self.experience.dataset
 

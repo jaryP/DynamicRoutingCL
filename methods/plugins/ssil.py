@@ -24,6 +24,7 @@ class SeparatedSoftmax(SupervisedPlugin):
     def after_training_exp(self, strategy, **kwargs):
         self.memory.update(strategy)
         self.seen_classes.append(strategy.experience.classes_in_this_experience)
+        print(len(self.memory.buffer))
     
     def before_train_dataset_adaptation(self, strategy: 'SupervisedTemplate',
                                         **kwargs):

@@ -1,3 +1,2 @@
 epochs: 30
 batch_size: 32
-device: 0

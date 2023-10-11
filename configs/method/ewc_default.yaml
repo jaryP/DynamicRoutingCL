@@ -1,0 +1,4 @@
+name: ewc
+lambda: 1
+save_name: ewc_base
+keep_importance_data: false

@@ -15,6 +15,7 @@ from avalanche.evaluation.metric_results import MetricValue
 from avalanche.evaluation.metric_utils import phase_and_task, stream_type
 from avalanche.evaluation.metrics import accuracy_metrics, bwt_metrics, \
     timing_metrics
+from avalanche.logging import CSVLogger
 # from avalanche.logging import StrategyLogger
 from avalanche.logging.text_logging import UNSUPPORTED_TYPES, TextLogger
 from avalanche.training.plugins import EvaluationPlugin
@@ -123,25 +124,12 @@ from utils import get_optimizer
             version_base='1.1',
             config_name="config")
 def avalanche_training(cfg: DictConfig):
+
     log = logging.getLogger(__name__)
     log.info(OmegaConf.to_yaml(cfg))
     log.info(os.getcwd())
 
     # check config
-    cfg_path = os.path.join(os.getcwd(), '.hydra', 'config.yaml')
-    if os.path.exists(cfg_path):
-        with open(cfg_path, 'r') as f:
-            past_cfg = yaml.safe_load(f)
-
-            keys_set = set([k for k in past_cfg.keys() if k != 'device'])
-            b = keys_set == set([k for k in cfg.keys() if k != 'device'])
-            assert b, (f'You are launching an experiment having output path {os.getcwd()}, '
-                                     f'but the experiment config and the one saved in the folder have not the same keys.')
-
-            b = all([past_cfg[k] == cfg[k] for k in keys_set])
-
-            assert b, (f'You are launching an experiment having output path {os.getcwd()}, '
-                                     f'but the experiment config and the one saved in the folder not equal: {past_cfg - cfg}')
 
     device = cfg.get('device', 'cpu')
 
@@ -154,21 +142,15 @@ def avalanche_training(cfg: DictConfig):
     shuffle = scenario['shuffle']
     shuffle_first = scenario.get('shuffle_first', False)
 
-    # seed = scenario.get('seed', None)
-
     model_cfg = cfg['model']
     model_name = model_cfg['name']
 
     method = cfg['method']
     plugin_name = method['name'].lower()
-    # save_name = method['save_name']
 
     training = cfg['training']
     epochs = training['epochs']
     batch_size = training['batch_size']
-    # device = training['device']
-
-    eval_every = training.get('eval_every', -1)
 
     num_workers = training.get('num_workers', 0)
     pin_memory = training.get('pin_memory', True)
@@ -176,8 +158,13 @@ def avalanche_training(cfg: DictConfig):
     experiment = cfg['experiment']
     n_experiments = experiment.get('experiments', 1)
     load = experiment.get('load', True)
+
     save = experiment.get('save', True)
     plot = experiment.get('plot', False)
+    eval_every = experiment.get('eval_every', -1)
+
+    save_states = experiment.get('save_states', False)
+    console_log = experiment.get('console_log', False)
 
     optimizer_cfg = cfg['optimizer']
     optimizer_name = optimizer_cfg.get('optimizer', 'sgd')
@@ -199,12 +186,30 @@ def avalanche_training(cfg: DictConfig):
     all_results = []
 
     base_path = os.getcwd()
+    cfg_path = os.path.join(os.getcwd(), '.hydra', 'config.yaml')
+    if os.path.exists(cfg_path):
+        with open(cfg_path, 'r') as f:
+            past_cfg = yaml.safe_load(f)
+
+            keys_set = set([k for k in past_cfg.keys() if k != 'device'])
+            b = keys_set == set([k for k in cfg.keys() if k != 'device'])
+
+            assert b, (
+                f'You are launching an experiment having output path {os.getcwd()}, '
+                f'but the experiment config and the one saved in the folder have not the same keys.')
+
+            b = all([past_cfg[k] == cfg[k] for k in keys_set])
+
+            assert b, (
+                f'You are launching an experiment having output path {os.getcwd()}, '
+                f'but the experiment config and the one saved in the folder not equal: {past_cfg - cfg}')
 
     is_cil = not task_incremental_learning
     task_incremental_learning = task_incremental_learning if plugin_name != 'cml' \
         else True
 
     force_sit = True if method['name'] == 'der' else False
+    force_sit = False
 
     for exp_n in range(1, n_experiments + 1):
         log.info(f'Starting experiment {exp_n} (of {n_experiments})')
@@ -219,7 +224,9 @@ def avalanche_training(cfg: DictConfig):
 
         os.makedirs(experiment_path, exist_ok=True)
 
-        results_path = os.path.join(experiment_path, 'results.json')
+        results_path = os.path.join(experiment_path, 'last_results.json')
+        complete_results_path = os.path.join(experiment_path, 'complete_results.json')
+
         train_results_path = os.path.join(experiment_path, 'train_results.json')
 
         if plugin_name in ['icarl', 'cope', 'ssil', 'moe'] and not is_cil:
@@ -228,15 +235,13 @@ def avalanche_training(cfg: DictConfig):
         if plugin_name in ['er'] and is_cil:
             assert is_cil, 'ER only work under Task Incremental Scenario'
 
-        tasks = get_dataset_nc_scenario(name=dataset,
-                                        scenario=scenario_name,
-                                        n_tasks=n_tasks,
-                                        shuffle=shuffle_first if exp_n == 0 else shuffle,
+        tasks = get_dataset_nc_scenario(name=dataset, n_tasks=n_tasks,
                                         til=task_incremental_learning,
-                                        seed=seed,
-                                        force_sit=force_sit,
+                                        shuffle=shuffle_first if exp_n == 0 else shuffle,
+                                        seed=seed, force_sit=force_sit,
                                         method_name=plugin_name,
-                                        sit_with_labels=True)
+                                        dev_split=training.get('dev_split',
+                                                               None))
 
         log.info(f'Original classes: {tasks.classes_order_original_ids}')
         log.info(f'Original classes per exp: {tasks.original_classes_in_exp}')
@@ -244,13 +249,13 @@ def avalanche_training(cfg: DictConfig):
         if load and os.path.exists(results_path):
             log.info(f'Results loaded')
             with open(results_path) as json_file:
-                results = json.load(json_file)
+                results_after_each_task = json.load(json_file)
 
             if os.path.exists(train_results_path):
                 with open(train_results_path) as json_file:
                     train_res = json.load(json_file)
             else:
-                train_res = results
+                train_res = results_after_each_task
         else:
 
             img, _, _ = tasks.train_stream[0].dataset[0]
@@ -267,19 +272,12 @@ def avalanche_training(cfg: DictConfig):
                                  is_class_incremental_learning=is_cil,
                                  **model_cfg)
 
-            file_path = os.path.join(experiment_path, 'results.txt')
-            output_file = open(file_path, 'w')
-
             eval_plugin = EvaluationPlugin(
                 accuracy_metrics(stream=True,
                                  trained_experience=True, experience=True),
                 bwt_metrics(experience=True, stream=True),
                 # timing_metrics(minibatch=True, epoch=True, experience=False),
-                loggers=[
-                    TextLogger(),
-                    # StrategyLogger(),
-                    # CustomTextLogger(),
-                ],
+                loggers=[TextLogger()] if console_log else [],
             )
 
             opt = get_optimizer(parameters=model.parameters(),
@@ -304,7 +302,8 @@ def avalanche_training(cfg: DictConfig):
                                evaluator=eval_plugin,
                                device=device)
 
-            results = []
+            results_after_each_task = []
+            all_results = {}
 
             indexes = np.arange(len(tasks.train_stream))
 
@@ -326,7 +325,7 @@ def avalanche_training(cfg: DictConfig):
 
                         break
 
-                    results.append(strategy.eval(tasks.test_stream,
+                    results_after_each_task.append(strategy.eval(tasks.test_stream,
                                                  pin_memory=pin_memory,
                                                  num_workers=num_workers))
 
@@ -334,11 +333,20 @@ def avalanche_training(cfg: DictConfig):
                 for i in indexes:
                     # for i, experience in enumerate(tasks.train_stream):
                     experience = tasks.train_stream[i]
-                    train_res = strategy.train(experiences=experience,
+
+                    eval_streams = [[e] for e in tasks.test_stream[:i + 1]]
+
+                    res = strategy.train(experiences=experience,
+                                               eval_streams=eval_streams,
                                                pin_memory=pin_memory,
                                                num_workers=num_workers)
 
-                    train_res = strategy.evaluator.all_metric_results
+                    # train_res = strategy.evaluator.all_metric_results
+
+                    all_results = strategy.evaluator.get_all_metrics()
+
+                    if save_states:
+                        torch.save(strategy, os.path.join(results_path, f'state_{i}.pt'))
 
                     # mb_times = strategy.evaluator.all_metric_results['Time_MB/train_phase/train_stream/Task000'][1]
                     # start = 0 if len(mb_time_results) == 0 else sum(map(len, mb_time_results))
@@ -346,20 +354,18 @@ def avalanche_training(cfg: DictConfig):
                     # mb_time_results.append(mb_times[start:])
 
                     # train_results.append()
-
-                    results.append(strategy.eval(tasks.test_stream[:i + 1],
-                                                 pin_memory=pin_memory,
-                                                 num_workers=num_workers))
-
-            output_file.close()
+                    results_after_each_task.append(res)
+                    # results_after_each_task.append(strategy.eval(tasks.test_stream[:i + 1],
+                    #                              pin_memory=pin_memory,
+                    #                              num_workers=num_workers))
 
             with open(results_path, 'w') as f:
-                json.dump(results, f, ensure_ascii=False, indent=4)
+                json.dump(results_after_each_task, f, ensure_ascii=False, indent=4)
 
-            with open(train_results_path, 'w') as f:
-                json.dump(train_res, f, ensure_ascii=False, indent=4)
+            with open(complete_results_path, 'w') as f:
+                json.dump(all_results, f, ensure_ascii=False, indent=4)
 
-        for res in results:
+        for res in results_after_each_task:
             average_accuracy = []
             for k, v in res.items():
                 if k.startswith('Top1_Acc_Stream/eval_phase/test_stream/'):
@@ -374,10 +380,10 @@ def avalanche_training(cfg: DictConfig):
             if k.startswith('Time_MB') or k.startswith('Time_Epoch'):
                 log.info(f'Train {k}: {np.mean(v[1]), np.std(v[1])}')
 
-        for k, v in results[-1].items():
+        for k, v in results_after_each_task[-1].items():
             log.info(f'Test Metric {k}:  {v}')
 
-        all_results.append(results)
+        all_results.append(results_after_each_task)
 
     log.info(f'Average across the experiments.')
 
@@ -391,7 +397,7 @@ def avalanche_training(cfg: DictConfig):
     m = {k: np.mean(v) for k, v in mean_res.items()}
     s = {k: np.std(v) for k, v in mean_res.items()}
 
-    for k, v in results[-1].items():
+    for k, v in results_after_each_task[-1].items():
         _m = m[k]
         _s = s[k]
         log.info(f'Metric {k}: mean: {_m:.2f}, std: {_s:.2f}')
