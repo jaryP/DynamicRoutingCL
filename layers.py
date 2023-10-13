@@ -1031,6 +1031,8 @@ class BlockRoutingLayer(DynamicModule):
     def __init__(self,
                  input_channels: int,
                  output_channels: int,
+                 n_blocks,
+                 block_type,
                  project_dim = None,
                  get_average_features = False,
                  # out_project_dim = None,
@@ -1038,17 +1040,23 @@ class BlockRoutingLayer(DynamicModule):
 
         super().__init__()
 
+        assert n_blocks > 0
+        assert block_type in ['conv']
+
         self.input_channels = input_channels
         self.output_channels = output_channels
 
         self.blocks = nn.ModuleDict()
         self.projectors = nn.ModuleDict()
 
-        for i in range(10):
-            b = nn.Conv2d(in_channels=self.input_channels,
-                          out_channels=self.output_channels,
-                          kernel_size=3,
-                          stride=1)
+        for i in range(n_blocks):
+            b = nn.Sequential(nn.Conv2d(in_channels=self.input_channels,
+                              out_channels=self.output_channels,
+                              kernel_size=3,
+                              stride=1))
+
+            if block_type == 'conv_pool':
+                b.append(nn.MaxPool2d(2))
 
             i = str(i)
             self.blocks[i] = b
@@ -1056,7 +1064,7 @@ class BlockRoutingLayer(DynamicModule):
             if (project_dim is not None and project_dim > 0) or get_average_features:
                 l = nn.Sequential(nn.AdaptiveAvgPool2d(4),
                                   nn.Flatten(1))
-                
+
                 if project_dim is not None and project_dim > 0:
                     l.append(nn.ReLU())
                     l.append(nn.Linear(output_channels * 16, project_dim))

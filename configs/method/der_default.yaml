@@ -1,0 +1,5 @@
+name: der
+mem_size: 500
+alpha: 1
+beta: 1
+save_name: der_default
