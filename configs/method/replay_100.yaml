@@ -1,3 +1,4 @@
-name: replay
-mem_size: 100
-save_name: replay_100
+method:
+  _target_: avalanche.training.Replay
+  mem_size: 100
+

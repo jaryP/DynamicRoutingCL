@@ -1,0 +1,2 @@
+run:
+  dir: results/search/${scenario.scenario}/${method.name}/${hydra.job.override_dirname}

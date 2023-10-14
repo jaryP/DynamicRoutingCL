@@ -1,3 +1,4 @@
-name: gem
-patterns_per_experience: 100
-save_name: gem_100
+method:
+  _target_: avalanche.training.GEM
+  patterns_per_experience: 100
+  memory_strength: 0.5

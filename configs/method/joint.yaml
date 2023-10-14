@@ -1,0 +1,2 @@
+method:
+  _target_: avalanche.training.JointTraining

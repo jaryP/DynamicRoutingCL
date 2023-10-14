@@ -1,2 +1,4 @@
-name: none
-save_name: none
+name: naive
+save_name: naive
+method:
+  _target_: avalanche.training.Naive

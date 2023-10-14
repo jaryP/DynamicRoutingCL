@@ -281,11 +281,11 @@ class SeparatedSoftmaxIncrementalLearning(SupervisedTemplate):
                  train_epochs: int = 1,
                  eval_mb_size: int = None,
                  device=None,
-                 sit_memory_size: int = 500,
+                 mem_size: int = 500,
                  plugins: Optional[List[SupervisedTemplate]] = None,
                  evaluator: EvaluationPlugin = default_evaluator, eval_every=-1):
 
-        rp = SeparatedSoftmax(mem_size=sit_memory_size)
+        rp = SeparatedSoftmax(mem_size=mem_size)
 
         self.rp = rp
 

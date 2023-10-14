@@ -52,7 +52,7 @@ class AvalanceCombinedModel(MultiTaskModule):
                             return_embeddings: bool = False,
                             t=None):
 
-        out = self.feature_extractor(x, task_label)
+        out = self.feature_extractor(x, task_labels=task_label)
         out = torch.flatten(out, 1)
 
         # out = self.dropout(out)
