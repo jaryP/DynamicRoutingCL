@@ -13,6 +13,7 @@ from avalanche.evaluation.metrics import accuracy_metrics, bwt_metrics, \
     timing_metrics
 
 from avalanche.logging.text_logging import TextLogger
+from avalanche.training import DER
 from avalanche.training.plugins import EvaluationPlugin
 from omegaconf import DictConfig, OmegaConf
 from torch.nn import CrossEntropyLoss
@@ -275,12 +276,17 @@ def avalanche_training(cfg: DictConfig):
             # model = hydra.utils.instantiate(cfg1)
             # m = model([10, 12], 1, 2, 3, 5, 6)
 
+            head_classes = cfg.model.get('head_classes', None)
+            if head_classes is not None:
+                del cfg.model.head_classes
+
             backbone = hydra.utils.instantiate(cfg.model)
 
             model = get_cl_model(backbone=backbone,
                                  model_name='',
                                  input_shape=tuple(img.shape),
                                  method_name=plugin_name,
+                                 head_classes=head_classes,
                                  is_class_incremental_learning=is_cil,
                                  **model_cfg)
 
@@ -327,6 +333,11 @@ def avalanche_training(cfg: DictConfig):
                                                        eval_every=eval_every)
             else:
                 assert False, f'Method not implemented yet {cfg}'
+
+            if isinstance(strategy, DER) and head_classes is None:
+                assert 'head_classes' in cfg.model, (
+                    'When using DER strategy, '
+                    'parameter model.head_classes must be specified.')
 
             # trainer = get_trainer(**method,
             #                       tasks=tasks,
