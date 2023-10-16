@@ -6,4 +6,4 @@ method:
   warm_up_epochs: -1
   future_task_reg: 0.1
   future_margin: 5
-  gamma: 1
+  gamma: 0.5

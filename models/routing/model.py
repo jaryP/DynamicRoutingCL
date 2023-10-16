@@ -431,7 +431,10 @@ class RoutingModel(MultiTaskModule):
         self.sample_wise_future_sampling = sample_wise_future_sampling
         self.freeze_projectors = freeze_projectors
 
-        assert path_selection_strategy in ['random', 'usage', 'gradient']
+        assert path_selection_strategy in ['random', 'usage',
+                                           'inverse_usage',
+                                           'negative_usage',
+                                           'gradient']
         # assert path_selection_strategy in ['random', 'usage']
         assert prediction_mode in ['class', 'task']
 
@@ -529,7 +532,7 @@ class RoutingModel(MultiTaskModule):
                                               replace=False)
             paths = [self.available_paths[i] for i in selected_paths]
 
-        elif self.path_selection_strategy == 'usage':
+        elif 'usage'in self.path_selection_strategy:
             probs = []
 
             used_blocks = set()
@@ -548,7 +551,14 @@ class RoutingModel(MultiTaskModule):
                 probs.append(c)
 
             probs = np.asarray(probs)
+
+            if self.path_selection_strategy == 'negative_usage':
+                probs -= max(probs)
+            elif self.path_selection_strategy == 'inverse_usage':
+                probs[probs > 0] = 1 / probs[probs > 0]
+
             probs = probs / sum(probs)
+
             selected_paths = np.random.choice(np.arange(len(self.available_paths)),
                                               to_samples,
                                               replace=False,

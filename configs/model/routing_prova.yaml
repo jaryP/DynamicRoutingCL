@@ -14,4 +14,3 @@ block_factory:
 #    _target_: hydra.utils.get_class
   _target_: hydra.utils.get_method
   path: models.routing.factory.get_conv_block
-  bias: no
