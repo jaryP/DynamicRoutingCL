@@ -1,5 +1,7 @@
 from torch import nn
 
+from models.backbone.resnet import BasicBlock
+
 
 # TODO: add pooling operations
 def get_conv_block(input_channels, output_channels,
@@ -22,3 +24,7 @@ def get_conv_block(input_channels, output_channels,
 def get_double_conv_block(input_channels, output_channels):
     return nn.Sequential(get_conv_block(input_channels, output_channels),
                          get_conv_block(output_channels, output_channels))
+
+
+def get_resnet_block(input_channels, output_channels):
+    return BasicBlock(input_channels, output_channels, option='B')

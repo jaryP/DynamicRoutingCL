@@ -14,7 +14,7 @@ from models.routing.layers import BlockRoutingLayer
 # class RoutingModel(MultiTaskModule):
 #     def __init__(self,
 #                  model_dimension,
-#                  n_blocks_in_layer,
+#                  layers_block_n,
 #                  block_type,
 #                  cumulative=False,
 #                  freeze_past_tasks=False,
@@ -58,9 +58,9 @@ from models.routing.layers import BlockRoutingLayer
 #         self.layers = nn.ModuleList()
 #
 #         if model_dimension == 'tiny':
-#             self.layers.append(BlockRoutingLayer(3, 32, n_blocks=n_blocks_in_layer, block_type=block_type))
-#             self.layers.append(BlockRoutingLayer(32, 64, n_blocks=n_blocks_in_layer, block_type=block_type))
-#             self.layers.append(BlockRoutingLayer(64, 128, project_dim=128, n_blocks=n_blocks_in_layer, block_type=block_type))
+#             self.layers.append(BlockRoutingLayer(3, 32, n_blocks=layers_block_n, block_type=block_type))
+#             self.layers.append(BlockRoutingLayer(32, 64, n_blocks=layers_block_n, block_type=block_type))
+#             self.layers.append(BlockRoutingLayer(64, 128, project_dim=128, n_blocks=layers_block_n, block_type=block_type))
 #
 #         if cumulative:
 #             self.in_features = 32 + 64 + 128
@@ -397,7 +397,7 @@ from models.routing.layers import BlockRoutingLayer
 class RoutingModel(MultiTaskModule):
     def __init__(self,
                  layers_dims,
-                 n_blocks_in_layer,
+                 layers_block_n,
                  block_factory: Callable = get_conv_block,
                  cumulative=False,
                  freeze_past_tasks=False,
@@ -445,17 +445,22 @@ class RoutingModel(MultiTaskModule):
 
         input_channels = 3
 
-        for output_channels in layers_dims:
+        if not isinstance(layers_block_n, Sequence):
+            layers_block_n = [layers_block_n] * len(layers_dims)
+        else:
+            assert len(layers_block_n) == len(layers_dims)
+
+        for output_channels, n_blocks in zip(layers_dims, layers_block_n):
             self.layers.append(BlockRoutingLayer(input_channels=input_channels,
                                                  output_channels=output_channels,
-                                                 n_blocks=n_blocks_in_layer,
+                                                 n_blocks=n_blocks,
                                                  factory=block_factory))
             input_channels = output_channels
 
         # if model_dimension == 'tiny':
-        #     self.layers.append(BlockRoutingLayer(3, 32, n_blocks=n_blocks_in_layer, block_type=block_type))
-        #     self.layers.append(BlockRoutingLayer(32, 64, n_blocks=n_blocks_in_layer, block_type=block_type))
-        #     self.layers.append(BlockRoutingLayer(64, 128, project_dim=128, n_blocks=n_blocks_in_layer, block_type=block_type))
+        #     self.layers.append(BlockRoutingLayer(3, 32, n_blocks=layers_block_n, block_type=block_type))
+        #     self.layers.append(BlockRoutingLayer(32, 64, n_blocks=layers_block_n, block_type=block_type))
+        #     self.layers.append(BlockRoutingLayer(64, 128, project_dim=128, n_blocks=layers_block_n, block_type=block_type))
 
         # if cumulative:
         #     self.in_features = 32 + 64 + 128
@@ -704,6 +709,7 @@ class RoutingModel(MultiTaskModule):
         #         random_features = torch.cat(random_features, 0)
 
         # else:
+
         if self.training and self.use_future:
             sampled_paths = np.random.choice(
                 np.arange(len(self.available_paths)),
@@ -806,7 +812,7 @@ if __name__ == '__main__':
 
     cfg = {
         '_target_': 'models.RoutingModel',
-        'n_blocks_in_layer': 5,
+        'layers_block_n': 5,
         'layers_dims': [32, 56, 128],
         'future_paths_to_sample': 2}
 
@@ -814,11 +820,11 @@ if __name__ == '__main__':
 
     # _target_: models.routing.model.RoutingModel
     # layers_dims: [32, 56, 128]
-    # n_blocks_in_layer: 5
+    # layers_block_n: 5
     # block_type: 'conv'
     # future_paths_to_sample: 5
     # path_selection_strategy: 'random'
     # prediction_mode: 'class'
 
-    # model = RoutingModel([32, 64, 128], n_blocks_in_layer=10)
+    # model = RoutingModel([32, 64, 128], layers_block_n=10)
     print(model)

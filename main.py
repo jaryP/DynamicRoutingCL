@@ -11,6 +11,7 @@ import yaml
 from avalanche.benchmarks import data_incremental_benchmark
 from avalanche.evaluation.metrics import accuracy_metrics, bwt_metrics, \
     timing_metrics
+from avalanche.logging import WandBLogger
 
 from avalanche.logging.text_logging import TextLogger
 from avalanche.training import DER
@@ -139,10 +140,8 @@ def avalanche_training(cfg: DictConfig):
     shuffle_first = scenario.get('shuffle_first', False)
 
     model_cfg = cfg['model']
-    # model_name = model_cfg['name']
 
-    method = cfg['method']
-    plugin_name = method['name'].lower()
+    plugin_name = cfg.trainer_name.lower()
 
     training = cfg['training']
     epochs = training['epochs']
@@ -157,16 +156,10 @@ def avalanche_training(cfg: DictConfig):
 
     save = experiment.get('save', True)
     plot = experiment.get('plot', False)
-    eval_every = experiment.get('eval_every', )
+    eval_every = experiment.get('eval_every', 5)
 
     save_states = experiment.get('save_states', False)
     console_log = experiment.get('console_log', False)
-
-    # optimizer_cfg = cfg['optimizer']
-    # optimizer_name = optimizer_cfg.get('optimizer', 'sgd')
-    # lr = optimizer_cfg.get('lr', 1e-1)
-    # momentum = optimizer_cfg.get('momentum', 0.9)
-    # weight_decay = optimizer_cfg.get('weight_decay', 0)
 
     if device == 'cpu':
         warnings.warn("Device set to cpu.")
@@ -205,8 +198,10 @@ def avalanche_training(cfg: DictConfig):
     task_incremental_learning = task_incremental_learning if plugin_name != 'cml' \
         else True
 
-    force_sit = True if method['name'] == 'der' else False
+    force_sit = True if plugin_name == 'der' else False
     force_sit = False
+
+    head_classes = cfg.model.get('head_classes', None)
 
     for exp_n in range(1, n_experiments + 1):
         log.info(f'Starting experiment {exp_n} (of {n_experiments})')
@@ -259,24 +254,13 @@ def avalanche_training(cfg: DictConfig):
 
             img, _, _ = tasks.train_stream[0].dataset[0]
 
-            if method['name'] == 'der':
+            if plugin_name == 'der':
                 assert 'head_classes' in model_cfg, (
                     'Whn using DER you must specify '
                     'the head dimension of the model, '
                     'by setting head_classes parameter'
                     'in the config file.')
 
-            # cfg1 = {
-            #     '_target_': 'hydra.utils.get_class',
-            #     'path': 'models.RoutingModel',
-            #     # 'layers_dims': [32, 56, 128],
-            #     # 'future_paths_to_sample': 2
-            # }
-
-            # model = hydra.utils.instantiate(cfg1)
-            # m = model([10, 12], 1, 2, 3, 5, 6)
-
-            head_classes = cfg.model.get('head_classes', None)
             if head_classes is not None:
                 del cfg.model.head_classes
 
@@ -290,29 +274,28 @@ def avalanche_training(cfg: DictConfig):
                                  is_class_incremental_learning=is_cil,
                                  **model_cfg)
 
+            wandb_name = f'{cfg.scenario.dataset}/{cfg.scenario.n_tasks}_{cfg.trainer_name}_{exp_n}'
+
             eval_plugin = EvaluationPlugin(
                 accuracy_metrics(stream=True,
                                  trained_experience=True, experience=True),
                 bwt_metrics(experience=True, stream=True),
                 # timing_metrics(minibatch=True, epoch=True, experience=False),
                 # loggers=[TextLogger()] if console_log else [],
-                loggers=[TextLogger()],
+                loggers=[TextLogger(),
+                         WandBLogger(project_name=cfg.core.project_name,
+                                     run_name=wandb_name,
+                                     params={'config': OmegaConf.to_container(cfg, resolve=True)})],
             )
 
             opt = hydra.utils.instantiate(cfg.optimizer,
                                           params=model.parameters())
 
-            # opt = get_optimizer(parameters=model.parameters(),
-            #                     name=optimizer_name,
-            #                     lr=lr,
-            #                     weight_decay=weight_decay,
-            #                     momentum=momentum)
-
             criterion = CrossEntropyLoss()
 
-            if cfg is not None and 'method' in cfg.method:
-                if method.name == 'ICaRL':
-                    strategy = hydra.utils.instantiate(cfg.method.method,
+            if cfg is not None and '_target_' in cfg.method:
+                if plugin_name == 'ICaRL':
+                    strategy = hydra.utils.instantiate(cfg.method,
                                                        feature_extractor=model.feature_extractor,
                                                        classifier=model.classifier,
                                                        optimizer=opt,
@@ -322,7 +305,7 @@ def avalanche_training(cfg: DictConfig):
                                                        device=device,
                                                        eval_every=eval_every)
                 else:
-                    strategy = hydra.utils.instantiate(cfg.method.method,
+                    strategy = hydra.utils.instantiate(cfg.method,
                                                        model=model,
                                                        criterion=criterion,
                                                        optimizer=opt,
@@ -359,12 +342,12 @@ def avalanche_training(cfg: DictConfig):
 
             indexes = np.arange(len(tasks.train_stream))
 
-            if method['name'].lower() == 'cope':
+            if plugin_name == 'cope':
                 tasks = data_incremental_benchmark(tasks, batch_size,
                                                    shuffle=True)
                 indexes = np.arange(len(tasks.train_stream))
 
-                if method.get('shuffle', False):
+                if cfg.method.get('shuffle', False):
                     np.random.shuffle(indexes)
 
                 for _ in range(epochs):
@@ -393,6 +376,9 @@ def avalanche_training(cfg: DictConfig):
                                          eval_streams=eval_streams,
                                          pin_memory=pin_memory,
                                          num_workers=num_workers)
+
+                    parameters = sum(p.numel() for p in strategy.model.parameters() if p.requires_grad)
+                    res['model_parameters'] = parameters
 
                     # train_res = strategy.evaluator.all_metric_results
 

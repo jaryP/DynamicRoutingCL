@@ -1,3 +1,10 @@
+core:
+  project_name: 'routing-cl'
+  dataset_root: ./dataset/
+  results_path: ./results
+  version: 1
+  tags: overconfidence, neural networks, deep learning, regularization, margin loss
+
 defaults:
   - hydra: base
   - optimizer: sgd
@@ -6,6 +13,6 @@ defaults:
   - _self_
 
 device: cpu
-method:
-  name: ${method_path:${method.method._target_}}
+#trainer:
+trainer_name: ${method_path:${method._target_}}
 
