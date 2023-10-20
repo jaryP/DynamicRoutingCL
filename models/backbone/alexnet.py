@@ -3,6 +3,7 @@ from collections import defaultdict
 import torch
 from torch import nn
 
+__all__ = ['AlexNet']
 
 class AlexNet(nn.Module):
 
@@ -16,7 +17,7 @@ class AlexNet(nn.Module):
         self.c4 = nn.Conv2d(384, 256, kernel_size=3, padding=1)
         self.c5 = nn.Conv2d(256, 256, kernel_size=3, padding=1)
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         intermediate_layers = []
 
         for i in range(1, 6):
@@ -29,38 +30,7 @@ class AlexNet(nn.Module):
             x = torch.relu(x)
             intermediate_layers.append(x)
 
-        # intermediate_layers.append(x)
-        # input(len(intermediate_layers))
-
-        # x = self.c1(x)
-        # intermediate_layers.append(x)
-        # x = nn.functional.max_pool2d(x, kernel_size=2)
-        # x = torch.relu(x)
-        #
-        # x = self.c2(x)
-        # intermediate_layers.append(x)
-        # x = nn.functional.max_pool2d(x, kernel_size=2)
-        # x = torch.relu(x)
-        #
-        # x = self.c3(x)
-        # intermediate_layers.append(x)
-        # x = torch.relu(x)
-        #
-        # x = self.c4(x)
-        # intermediate_layers.append(x)
-        # x = torch.relu(x)
-        #
-        # # self.c5 = nn.Conv2d(256, 256, kernel_size=3, padding=1)
-        # x = self.c5(x)
-        # intermediate_layers.append(x)
-        # x = nn.functional.max_pool2d(x, kernel_size=3, stride=2)
-        # x = torch.relu(x)
-        # # conv_features = self.features(x)
-
-        # flatten = torch.flatten(x, 1)
-        # fc = self.fc_layers(flatten)
-
-        return intermediate_layers
+        return x
 
 
 class AlexnetClassifier(nn.Module):

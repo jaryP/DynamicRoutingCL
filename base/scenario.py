@@ -64,7 +64,7 @@ def get_dataset_nc_scenario(name: str, n_tasks: int, til: bool,
         dev_idx = idx[:dev_i]
         train_idx = idx[dev_i:]
 
-        test_split= torch.utils.data.Subset(train_split, dev_idx)
+        test_split = torch.utils.data.Subset(train_split, dev_idx)
         train_split = torch.utils.data.Subset(train_split, train_idx)
 
     if method_name == 'cope':

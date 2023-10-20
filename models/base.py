@@ -7,8 +7,8 @@ from avalanche.models import MultiHeadClassifier, IncrementalClassifier
 from torch import nn
 import torch.nn.functional as F
 
-from main_random_paths_random_centroids import RoutingModel
-from models import resnet20, resnet32, custom_vgg
+# from main_random_paths_random_centroids import RoutingModel
+from models import resnet20, resnet32, custom_vgg, RoutingModel
 from models.utils import AvalanceCombinedModel, CustomMultiHeadClassifier, \
     PytorchCombinedModel
 
@@ -93,7 +93,9 @@ def get_backbone(name: str, channels: int = 3, **kwargs):
     assert False, f'Inserted model name not valid {name}'
 
 
-def get_cl_model(model_name: str,
+def get_cl_model(
+        backbone,
+        model_name: str,
                  method_name: str,
                  input_shape: Tuple[int, int, int],
                  is_class_incremental_learning: bool = False,
@@ -103,10 +105,8 @@ def get_cl_model(model_name: str,
                  masking=False,
                  **kwargs):
 
-    if model_name == 'routing':
-        return RoutingModel(**kwargs)
-
-    backbone = get_backbone(channels=input_shape[0], **kwargs)
+    if isinstance(backbone, RoutingModel):
+        return backbone
 
     if method_name in ['cope', 'mcml']:
         return backbone

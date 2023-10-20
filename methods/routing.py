@@ -9,13 +9,13 @@ from torch import nn
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader
 
-from models.routing.routing import RoutingModel
+from models import RoutingModel
 
 
 class ContinuosRouting(SupervisedTemplate):
     def __init__(self, model,
                  optimizer: Optimizer,
-                 memory_size: int,
+                 mem_size: int,
                  train_mb_size: int = 1,
                  train_epochs: int = 1,
                  past_task_reg=1,
@@ -59,7 +59,7 @@ class ContinuosRouting(SupervisedTemplate):
         self.logit_regularization = 'mse'
         self.tau = 1
 
-        self.memory_size = memory_size
+        self.memory_size = mem_size
 
         if batch_size_mem is None:
             self.batch_size_mem = train_mb_size

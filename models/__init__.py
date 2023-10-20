@@ -1,5 +1,5 @@
-from .backbones.resnet import resnet20, resnet32, resnet44, \
+from .backbone.resnet import resnet20, resnet32, resnet44, \
     resnet56, resnet110, resnet1202
-from .backbones.alexnet import AlexNet
-from .backbones.vgg import custom_vgg
-from .routing.routing import RoutingModel
+from .backbone.alexnet import AlexNet
+from .backbone.vgg import custom_vgg
+from .routing.model import RoutingModel

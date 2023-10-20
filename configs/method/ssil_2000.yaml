@@ -1,3 +1,2 @@
-name: ssil
-memory_size: 2000
-save_name: ssil_2000
+_target_: methods.strategies.SeparatedSoftmaxIncrementalLearning
+mem_size: 2000

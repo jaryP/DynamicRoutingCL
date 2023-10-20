@@ -1,1 +1,1 @@
-name: cumulative
+_target_: avalanche.training.Cumulative

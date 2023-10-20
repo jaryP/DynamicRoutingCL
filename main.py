@@ -2,32 +2,30 @@ import json
 import logging
 import os
 import random
-import sys
 import warnings
-from collections import defaultdict
-from typing import List
+
 import hydra
 import numpy as np
 import torch
 import yaml
-from avalanche.benchmarks import data_incremental_benchmark
-from avalanche.evaluation.metric_results import MetricValue
-from avalanche.evaluation.metric_utils import phase_and_task, stream_type
+from avalanche.benchmarks import data_incremental_benchmark, SplitCIFAR10
 from avalanche.evaluation.metrics import accuracy_metrics, bwt_metrics, \
-    timing_metrics
-from avalanche.logging import CSVLogger
-# from avalanche.logging import StrategyLogger
-from avalanche.logging.text_logging import UNSUPPORTED_TYPES, TextLogger
+    timing_metrics, forgetting_metrics, MAC_metrics, StreamAccuracy, \
+    TrainedExperienceAccuracy
+from avalanche.logging import WandBLogger
+
+from avalanche.logging.text_logging import TextLogger
+from avalanche.training import DER
 from avalanche.training.plugins import EvaluationPlugin
 from omegaconf import DictConfig, OmegaConf
 from torch.nn import CrossEntropyLoss
 
-from base.methods import get_trainer
 from base.scenario import get_dataset_nc_scenario
-from methods.strategies import ContinualMetricLearning
 from models.base import get_cl_model
-from utils import get_optimizer
+from utils import TrainableParametersPlugin, ExperienceTrainableParameters, \
+    StreamTrainableParameters
 
+# from models.base import get_cl_model
 
 # class CustomTextLogger(StrategyLogger):
 #     def __init__(self, file=sys.stdout):
@@ -120,11 +118,13 @@ from utils import get_optimizer
 #                   file=self.file,
 #                   flush=True)
 
+OmegaConf.register_new_resolver("method_path", lambda x: x.split('.')[-1])
+
+
 @hydra.main(config_path="configs",
             version_base='1.1',
             config_name="config")
 def avalanche_training(cfg: DictConfig):
-
     log = logging.getLogger(__name__)
     log.info(OmegaConf.to_yaml(cfg))
     log.info(os.getcwd())
@@ -143,10 +143,8 @@ def avalanche_training(cfg: DictConfig):
     shuffle_first = scenario.get('shuffle_first', False)
 
     model_cfg = cfg['model']
-    model_name = model_cfg['name']
 
-    method = cfg['method']
-    plugin_name = method['name'].lower()
+    plugin_name = cfg.trainer_name.lower()
 
     training = cfg['training']
     epochs = training['epochs']
@@ -161,16 +159,10 @@ def avalanche_training(cfg: DictConfig):
 
     save = experiment.get('save', True)
     plot = experiment.get('plot', False)
-    eval_every = experiment.get('eval_every', -1)
+    eval_every = experiment.get('eval_every', 5)
 
     save_states = experiment.get('save_states', False)
     console_log = experiment.get('console_log', False)
-
-    optimizer_cfg = cfg['optimizer']
-    optimizer_name = optimizer_cfg.get('optimizer', 'sgd')
-    lr = optimizer_cfg.get('lr', 1e-1)
-    momentum = optimizer_cfg.get('momentum', 0.9)
-    weight_decay = optimizer_cfg.get('weight_decay', 0)
 
     if device == 'cpu':
         warnings.warn("Device set to cpu.")
@@ -187,29 +179,32 @@ def avalanche_training(cfg: DictConfig):
 
     base_path = os.getcwd()
     cfg_path = os.path.join(os.getcwd(), '.hydra', 'config.yaml')
-    if os.path.exists(cfg_path):
-        with open(cfg_path, 'r') as f:
-            past_cfg = yaml.safe_load(f)
 
-            keys_set = set([k for k in past_cfg.keys() if k != 'device'])
-            b = keys_set == set([k for k in cfg.keys() if k != 'device'])
-
-            assert b, (
-                f'You are launching an experiment having output path {os.getcwd()}, '
-                f'but the experiment config and the one saved in the folder have not the same keys.')
-
-            b = all([past_cfg[k] == cfg[k] for k in keys_set])
-
-            assert b, (
-                f'You are launching an experiment having output path {os.getcwd()}, '
-                f'but the experiment config and the one saved in the folder not equal: {past_cfg - cfg}')
+    # if os.path.exists(cfg_path):
+    #     with open(cfg_path, 'r') as f:
+    #         past_cfg = yaml.safe_load(f)
+    #
+    #         keys_set = set([k for k in past_cfg.keys() if k != 'device'])
+    #         b = keys_set == set([k for k in cfg.keys() if k != 'device'])
+    #
+    #         assert b, (
+    #             f'You are launching an experiment having output path {os.getcwd()}, '
+    #             f'but the experiment config and the one saved in the folder have not the same keys.')
+    #
+    #         b = all([past_cfg[k] == cfg[k] for k in keys_set])
+    #
+    #         assert b, (
+    #             f'You are launching an experiment having output path {os.getcwd()}, '
+    #             f'but the experiment config and the one saved in the folder not equal: {past_cfg - cfg}')
 
     is_cil = not task_incremental_learning
     task_incremental_learning = task_incremental_learning if plugin_name != 'cml' \
         else True
 
-    force_sit = True if method['name'] == 'der' else False
+    force_sit = True if plugin_name == 'der' else False
     force_sit = False
+
+    head_classes = cfg.model.get('head_classes', None)
 
     for exp_n in range(1, n_experiments + 1):
         log.info(f'Starting experiment {exp_n} (of {n_experiments})')
@@ -225,7 +220,8 @@ def avalanche_training(cfg: DictConfig):
         os.makedirs(experiment_path, exist_ok=True)
 
         results_path = os.path.join(experiment_path, 'last_results.json')
-        complete_results_path = os.path.join(experiment_path, 'complete_results.json')
+        complete_results_path = os.path.join(experiment_path,
+                                             'complete_results.json')
 
         train_results_path = os.path.join(experiment_path, 'train_results.json')
 
@@ -240,13 +236,13 @@ def avalanche_training(cfg: DictConfig):
                                         shuffle=shuffle_first if exp_n == 0 else shuffle,
                                         seed=seed, force_sit=force_sit,
                                         method_name=plugin_name,
-                                        dev_split=training.get('dev_split',
-                                                               None))
+                                        dev_split=training.get('dev_split', None))
 
         log.info(f'Original classes: {tasks.classes_order_original_ids}')
         log.info(f'Original classes per exp: {tasks.original_classes_in_exp}')
 
         if load and os.path.exists(results_path):
+            print('model loaded')
             log.info(f'Results loaded')
             with open(results_path) as json_file:
                 results_after_each_task = json.load(json_file)
@@ -260,59 +256,110 @@ def avalanche_training(cfg: DictConfig):
 
             img, _, _ = tasks.train_stream[0].dataset[0]
 
-            if method['name'] == 'der':
-                assert 'head_classes' in model_cfg, ('Whn using DER you must specify '
-                                                     'the head dimension of the model, '
-                                                     'by setting head_classes parameter'
-                                                     'in the config file.')
+            if plugin_name == 'der':
+                assert 'head_classes' in model_cfg, (
+                    'Whn using DER you must specify '
+                    'the head dimension of the model, '
+                    'by setting head_classes parameter'
+                    'in the config file.')
 
-            model = get_cl_model(model_name=model_name,
+            if head_classes is not None:
+                del cfg.model.head_classes
+
+            backbone = hydra.utils.instantiate(cfg.model)
+
+            model = get_cl_model(backbone=backbone,
+                                 model_name='',
                                  input_shape=tuple(img.shape),
                                  method_name=plugin_name,
+                                 head_classes=head_classes,
                                  is_class_incremental_learning=is_cil,
                                  **model_cfg)
 
+            wandb_name = f'{cfg.scenario.dataset}/{cfg.scenario.n_tasks}_{cfg.trainer_name}_{backbone.__class__.__name__}_{exp_n}'
+
             eval_plugin = EvaluationPlugin(
+                # StreamAccuracy(),
+                # TrainedExperienceAccuracy(),
                 accuracy_metrics(stream=True,
-                                 trained_experience=True, experience=True),
+                                 trained_experience=True,
+                                 experience=True),
                 bwt_metrics(experience=True, stream=True),
+                # MAC_metrics(minibatch=True, epoch=True, experience=True),
+                # forgetting_metrics(experience=True, stream=True),
+                # ExperienceTrainableParameters(),
+                StreamTrainableParameters(),
                 # timing_metrics(minibatch=True, epoch=True, experience=False),
-                loggers=[TextLogger()] if console_log else [],
+                # loggers=[TextLogger()] if console_log else [],
+                loggers=[TextLogger(),
+                         WandBLogger(project_name=cfg.core.project_name,
+                                     run_name=wandb_name,
+                                     params={
+                                         'config': OmegaConf.to_container(cfg,
+                                                                          resolve=True)})],
+                strict_checks=True
             )
 
-            opt = get_optimizer(parameters=model.parameters(),
-                                name=optimizer_name,
-                                lr=lr,
-                                weight_decay=weight_decay,
-                                momentum=momentum)
+            opt = hydra.utils.instantiate(cfg.optimizer,
+                                          params=model.parameters())
 
             criterion = CrossEntropyLoss()
 
-            trainer = get_trainer(**method,
-                                  tasks=tasks,
-                                  sit=is_cil)
+            if cfg is not None and '_target_' in cfg.method:
+                if plugin_name == 'ICaRL':
+                    strategy = hydra.utils.instantiate(cfg.method,
+                                                       feature_extractor=model.feature_extractor,
+                                                       classifier=model.classifier,
+                                                       optimizer=opt,
+                                                       train_epochs=epochs,
+                                                       train_mb_size=batch_size,
+                                                       evaluator=eval_plugin,
+                                                       device=device,
+                                                       eval_every=eval_every)
+                else:
+                    strategy = hydra.utils.instantiate(cfg.method,
+                                                       model=model,
+                                                       criterion=criterion,
+                                                       optimizer=opt,
+                                                       train_epochs=epochs,
+                                                       train_mb_size=batch_size,
+                                                       evaluator=eval_plugin,
+                                                       device=device,
+                                                       eval_every=eval_every)
+            else:
+                assert False, f'Method not implemented yet {cfg}'
 
-            strategy = trainer(model=model,
-                               criterion=criterion,
-                               optimizer=opt,
-                               train_epochs=epochs
-                               if method['name'].lower() != 'cope' else 1,
-                               train_mb_size=batch_size,
-                               eval_every=eval_every,
-                               evaluator=eval_plugin,
-                               device=device)
+            if isinstance(strategy, DER) and head_classes is None:
+                assert 'head_classes' in cfg.model, (
+                    'When using DER strategy, '
+                    'parameter model.head_classes must be specified.')
+
+            # trainer = get_trainer(**method,
+            #                       tasks=tasks,
+            #                       sit=is_cil,
+            #                       cfg=cfg)
+            #
+            # strategy = trainer(model=model,
+            #                    criterion=criterion,
+            #                    optimizer=opt,
+            #                    train_epochs=epochs
+            #                    if method['name'].lower() != 'cope' else 1,
+            #                    train_mb_size=batch_size,
+            #                    eval_every=eval_every,
+            #                    evaluator=eval_plugin,
+            #                    device=device)
 
             results_after_each_task = []
             all_results = {}
 
             indexes = np.arange(len(tasks.train_stream))
 
-            if method['name'].lower() == 'cope':
+            if plugin_name == 'cope':
                 tasks = data_incremental_benchmark(tasks, batch_size,
                                                    shuffle=True)
                 indexes = np.arange(len(tasks.train_stream))
 
-                if method.get('shuffle', False):
+                if cfg.method.get('shuffle', False):
                     np.random.shuffle(indexes)
 
                 for _ in range(epochs):
@@ -325,28 +372,38 @@ def avalanche_training(cfg: DictConfig):
 
                         break
 
-                    results_after_each_task.append(strategy.eval(tasks.test_stream,
-                                                 pin_memory=pin_memory,
-                                                 num_workers=num_workers))
+                    results_after_each_task.append(
+                        strategy.eval(tasks.test_stream,
+                                      pin_memory=pin_memory,
+                                      num_workers=num_workers))
 
             else:
                 for i in indexes:
                     # for i, experience in enumerate(tasks.train_stream):
                     experience = tasks.train_stream[i]
 
-                    eval_streams = [[e] for e in tasks.test_stream[:i + 1]]
+                    # eval_streams = [[e] for e in tasks.test_stream[:i + 1]]
+
+                    # res = strategy.train(experiences=experience,
+                    #                      eval_streams=eval_streams,
+                    #                      pin_memory=pin_memory,
+                    #                      num_workers=num_workers)
 
                     res = strategy.train(experiences=experience,
-                                               eval_streams=eval_streams,
-                                               pin_memory=pin_memory,
-                                               num_workers=num_workers)
+                                         eval_streams=[tasks.test_stream],
+                                         pin_memory=pin_memory,
+                                         num_workers=num_workers)
 
-                    # train_res = strategy.evaluator.all_metric_results
+                    # strag_eval = strategy.eval(tasks.test_stream[:i + 1],
+                    #                            pin_memory=pin_memory,
+                    #                            num_workers=num_workers)
 
                     all_results = strategy.evaluator.get_all_metrics()
+                    print(all_results, res)
 
                     if save_states:
-                        torch.save(strategy, os.path.join(results_path, f'state_{i}.pt'))
+                        torch.save(strategy,
+                                   os.path.join(results_path, f'state_{i}.pt'))
 
                     # mb_times = strategy.evaluator.all_metric_results['Time_MB/train_phase/train_stream/Task000'][1]
                     # start = 0 if len(mb_time_results) == 0 else sum(map(len, mb_time_results))
@@ -360,7 +417,8 @@ def avalanche_training(cfg: DictConfig):
                     #                              num_workers=num_workers))
 
             with open(results_path, 'w') as f:
-                json.dump(results_after_each_task, f, ensure_ascii=False, indent=4)
+                json.dump(results_after_each_task, f, ensure_ascii=False,
+                          indent=4)
 
             with open(complete_results_path, 'w') as f:
                 json.dump(all_results, f, ensure_ascii=False, indent=4)
@@ -376,32 +434,35 @@ def avalanche_training(cfg: DictConfig):
         # for k, v in train_res[-1].items():
         #     log.info(f'Train Metric {k}:  {v}')
 
-        for k, v in train_res.items():
-            if k.startswith('Time_MB') or k.startswith('Time_Epoch'):
-                log.info(f'Train {k}: {np.mean(v[1]), np.std(v[1])}')
+        # for k, v in train_res.items():
+        #     if k.startswith('Time_MB') or k.startswith('Time_Epoch'):
+        #         log.info(f'Train {k}: {np.mean(v[1]), np.std(v[1])}')
+        #
+        # for k, v in results_after_each_task[-1].items():
+        #     log.info(f'Test Metric {k}:  {v}')
+        #
+        # all_results.append(results_after_each_task)
 
-        for k, v in results_after_each_task[-1].items():
-            log.info(f'Test Metric {k}:  {v}')
-
-        all_results.append(results_after_each_task)
-
-    log.info(f'Average across the experiments.')
-
-    mean_res = defaultdict(list)
-
-    for i, r in enumerate(all_results):
-
-        for k, v in r[-1].items():
-            mean_res[k].append(v)
-
-    m = {k: np.mean(v) for k, v in mean_res.items()}
-    s = {k: np.std(v) for k, v in mean_res.items()}
-
-    for k, v in results_after_each_task[-1].items():
-        _m = m[k]
-        _s = s[k]
-        log.info(f'Metric {k}: mean: {_m:.2f}, std: {_s:.2f}')
+    # log.info(f'Average across the experiments.')
+    #
+    # mean_res = defaultdict(list)
+    #
+    # for i, r in enumerate(all_results):
+    #
+    #     for k, v in r[-1].items():
+    #         mean_res[k].append(v)
+    #
+    # m = {k: np.mean(v) for k, v in mean_res.items()}
+    # s = {k: np.std(v) for k, v in mean_res.items()}
+    #
+    # for k, v in results_after_each_task[-1].items():
+    #     _m = m[k]
+    #     _s = s[k]
+    #     log.info(f'Metric {k}: mean: {_m:.2f}, std: {_s:.2f}')
 
 
 if __name__ == "__main__":
+    # try:
     avalanche_training()
+    # except Exception as e:
+    #     print(e)

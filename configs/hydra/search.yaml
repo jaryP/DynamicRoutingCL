@@ -1,0 +1,13 @@
+#hydra:
+run:
+  dir: results/search/${scenario.scenario}/${method.name}/${hydra.job.override_dirname}
+sweep:
+  dir: results/multirun/${scenario.scenario}/${method.save_name}
+  subdir: ${hydra.job.override_dirname}
+job:
+  chdir: True
+  config:
+    override_dirname:
+      exclude_keys: ['device', 'training', 'experiment', 'hydra']
+      kv_sep: '='
+      item_sep: '_'

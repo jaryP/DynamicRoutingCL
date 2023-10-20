@@ -1,1 +1,1 @@
-name: alexnet
+_target_: models.backbone.AlexNet

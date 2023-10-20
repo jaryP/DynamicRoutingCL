@@ -1,1 +1,1 @@
-name: resnet20
+_target_: models.backbone.resnet20
