@@ -14,7 +14,15 @@ replay)
   python main.py +scenario=cil_cifar10_5tasks +model=resnet20 +training=cifar10_5 +method=replay_default optimizer=adam device=$DEVICE experiment=base1 method.mem_size=200
 ;;
 routing)
-  python main.py +scenario=cil_cifar10_5tasks +model=routing_3l_convblock +training=cifar10_5 +method=routing_cifar10 optimizer=adam device=$DEVICE experiment=base1 method.mem_size=200
+
+  python main.py +scenario=cil_cifar10_5tasks +model=routing_3l_convblock +training=cifar10_5 +method=routing_cifar10 optimizer=adam device=$DEVICE experiment=base1 method.mem_size=200 model.path_selection_strategy=random
+  python main.py +scenario=cil_cifar10_5tasks +model=routing_3l_convblock +training=cifar10_5 +method=routing_cifar10 optimizer=adam device=$DEVICE experiment=base1 method.mem_size=200 model.path_selection_strategy=usage
+  python main.py +scenario=cil_cifar10_5tasks +model=routing_3l_convblock +training=cifar10_5 +method=routing_cifar10 optimizer=adam device=$DEVICE experiment=base1 method.mem_size=200 model.path_selection_strategy=inverse_usage
+
+  python main.py +scenario=cil_cifar10_5tasks +model=routing_3l_doubleconvblock +training=cifar10_5 +method=routing_cifar10 optimizer=adam device=$DEVICE experiment=base1 method.mem_size=200 model.path_selection_strategy=random
+  python main.py +scenario=cil_cifar10_5tasks +model=routing_3l_doubleconvblock +training=cifar10_5 +method=routing_cifar10 optimizer=adam device=$DEVICE experiment=base1 method.mem_size=200 model.path_selection_strategy=usage
+  python main.py +scenario=cil_cifar10_5tasks +model=routing_3l_doubleconvblock +training=cifar10_5 +method=routing_cifar10 optimizer=adam device=$DEVICE experiment=base1 method.mem_size=200 model.path_selection_strategy=inverse_usage
+
 #  python main.py +scenario=cil_cifar10_5tasks +model=resnet20 +training=cifar10_5 +method=replay_default optimizer=adam device=$DEVICE experiment=base1 method.mem_size=200
 ;;
 *)

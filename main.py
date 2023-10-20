@@ -297,7 +297,7 @@ def avalanche_training(cfg: DictConfig):
                                      params={
                                          'config': OmegaConf.to_container(cfg,
                                                                           resolve=True)})],
-                strict_checks=True
+                strict_checks=False
             )
 
             opt = hydra.utils.instantiate(cfg.optimizer,
@@ -390,7 +390,7 @@ def avalanche_training(cfg: DictConfig):
                     #                      num_workers=num_workers)
 
                     res = strategy.train(experiences=experience,
-                                         eval_streams=[tasks.test_stream],
+                                         eval_streams=[tasks.test_stream[:i + 1]],
                                          pin_memory=pin_memory,
                                          num_workers=num_workers)
 
