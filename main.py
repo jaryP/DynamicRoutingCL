@@ -8,7 +8,7 @@ import hydra
 import numpy as np
 import torch
 import yaml
-from avalanche.benchmarks import data_incremental_benchmark
+from avalanche.benchmarks import data_incremental_benchmark, SplitCIFAR10
 from avalanche.evaluation.metrics import accuracy_metrics, bwt_metrics, \
     timing_metrics, forgetting_metrics, MAC_metrics, StreamAccuracy, \
     TrainedExperienceAccuracy
@@ -236,8 +236,7 @@ def avalanche_training(cfg: DictConfig):
                                         shuffle=shuffle_first if exp_n == 0 else shuffle,
                                         seed=seed, force_sit=force_sit,
                                         method_name=plugin_name,
-                                        dev_split=training.get('dev_split',
-                                                               None))
+                                        dev_split=training.get('dev_split', None))
 
         log.info(f'Original classes: {tasks.classes_order_original_ids}')
         log.info(f'Original classes per exp: {tasks.original_classes_in_exp}')
@@ -298,6 +297,7 @@ def avalanche_training(cfg: DictConfig):
                                      params={
                                          'config': OmegaConf.to_container(cfg,
                                                                           resolve=True)})],
+                strict_checks=True
             )
 
             opt = hydra.utils.instantiate(cfg.optimizer,
@@ -390,7 +390,7 @@ def avalanche_training(cfg: DictConfig):
                     #                      num_workers=num_workers)
 
                     res = strategy.train(experiences=experience,
-                                         eval_streams=[tasks.test_stream[:i + 1]],
+                                         eval_streams=[tasks.test_stream],
                                          pin_memory=pin_memory,
                                          num_workers=num_workers)
 
