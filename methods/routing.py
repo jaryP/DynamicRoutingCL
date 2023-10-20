@@ -363,9 +363,9 @@ class ContinuosRouting(SupervisedTemplate):
 
             self.past_dataset[y] = dataset.train().subset(indexes)
 
-        if self.experience.current_experience > 0:
-            self.past_model = deepcopy(self.model)
-            self.past_model.eval()
+        # if self.experience.current_experience > 0:
+        self.past_model = deepcopy(self.model)
+        self.past_model.eval()
 
         return
 
@@ -438,18 +438,20 @@ class ContinuosRouting(SupervisedTemplate):
     @torch.no_grad()
     def _before_training_exp(self, **kwargs):
 
-        classes = self.experience.classes_in_this_experience
-        self.tasks_nclasses[self.experience.task_label] = classes
+        # classes = self.experience.classes_in_this_experience
+        # self.tasks_nclasses[self.experience.task_label] = classes
 
         super()._before_training_exp(**kwargs)
 
-        if self.experience.current_experience > 0:
-            self.model.internal_features = None
+        if self.model is not None:
+
+        # if self.experience.current_experience > 0:
+        #     self.model.internal_features = None
             self.past_model = deepcopy(self.model)
             self.past_model.eval()
 
     def criterion(self):
-        tid = self.experience.current_experience
+        # tid = self.experience.current_experience
 
         if not self.is_training:
             if isinstance(self.model, RoutingModel):

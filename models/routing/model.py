@@ -633,7 +633,7 @@ class RoutingModel(MultiTaskModule):
         #     l.activate_blocks(b)
 
         z = experience.classes_in_this_experience \
-            if self.prediction_mode == 'class' else experience.task_labels
+            if self.prediction_mode == 'class' else [len(self.assigned_paths) + 1]
 
         for c, p in zip(z, paths):
             self.available_paths.remove(p)
