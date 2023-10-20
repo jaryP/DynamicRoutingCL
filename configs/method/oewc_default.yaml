@@ -1,4 +1,4 @@
-name: oewc
-lambda: 1
-save_name: oewc_base
-keep_importance_data: false
+_target_: avalanche.training.EWC
+ewc_lambda: 1
+mode: 'online'
+keep_importance_data: no

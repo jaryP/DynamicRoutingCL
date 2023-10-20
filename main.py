@@ -10,7 +10,8 @@ import torch
 import yaml
 from avalanche.benchmarks import data_incremental_benchmark
 from avalanche.evaluation.metrics import accuracy_metrics, bwt_metrics, \
-    timing_metrics
+    timing_metrics, forgetting_metrics, MAC_metrics, StreamAccuracy, \
+    TrainedExperienceAccuracy
 from avalanche.logging import WandBLogger
 
 from avalanche.logging.text_logging import TextLogger
@@ -21,6 +22,8 @@ from torch.nn import CrossEntropyLoss
 
 from base.scenario import get_dataset_nc_scenario
 from models.base import get_cl_model
+from utils import TrainableParametersPlugin, ExperienceTrainableParameters, \
+    StreamTrainableParameters
 
 # from models.base import get_cl_model
 
@@ -274,18 +277,27 @@ def avalanche_training(cfg: DictConfig):
                                  is_class_incremental_learning=is_cil,
                                  **model_cfg)
 
-            wandb_name = f'{cfg.scenario.dataset}/{cfg.scenario.n_tasks}_{cfg.trainer_name}_{exp_n}'
+            wandb_name = f'{cfg.scenario.dataset}/{cfg.scenario.n_tasks}_{cfg.trainer_name}_{backbone.__class__.__name__}_{exp_n}'
 
             eval_plugin = EvaluationPlugin(
+                # StreamAccuracy(),
+                # TrainedExperienceAccuracy(),
                 accuracy_metrics(stream=True,
-                                 trained_experience=True, experience=True),
+                                 trained_experience=True,
+                                 experience=True),
                 bwt_metrics(experience=True, stream=True),
+                # MAC_metrics(minibatch=True, epoch=True, experience=True),
+                # forgetting_metrics(experience=True, stream=True),
+                # ExperienceTrainableParameters(),
+                StreamTrainableParameters(),
                 # timing_metrics(minibatch=True, epoch=True, experience=False),
                 # loggers=[TextLogger()] if console_log else [],
                 loggers=[TextLogger(),
                          WandBLogger(project_name=cfg.core.project_name,
                                      run_name=wandb_name,
-                                     params={'config': OmegaConf.to_container(cfg, resolve=True)})],
+                                     params={
+                                         'config': OmegaConf.to_container(cfg,
+                                                                          resolve=True)})],
             )
 
             opt = hydra.utils.instantiate(cfg.optimizer,
@@ -372,15 +384,19 @@ def avalanche_training(cfg: DictConfig):
 
                     eval_streams = [[e] for e in tasks.test_stream[:i + 1]]
 
+                    # res = strategy.train(experiences=experience,
+                    #                      eval_streams=eval_streams,
+                    #                      pin_memory=pin_memory,
+                    #                      num_workers=num_workers)
+
                     res = strategy.train(experiences=experience,
-                                         eval_streams=eval_streams,
+                                         eval_streams=[tasks.test_stream[:i + 1]],
                                          pin_memory=pin_memory,
                                          num_workers=num_workers)
 
-                    parameters = sum(p.numel() for p in strategy.model.parameters() if p.requires_grad)
-                    res['model_parameters'] = parameters
-
-                    # train_res = strategy.evaluator.all_metric_results
+                    # strag_eval = strategy.eval(tasks.test_stream[:i + 1],
+                    #                            pin_memory=pin_memory,
+                    #                            num_workers=num_workers)
 
                     all_results = strategy.evaluator.get_all_metrics()
                     print(all_results, res)

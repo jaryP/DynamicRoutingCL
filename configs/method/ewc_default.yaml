@@ -1,5 +1,4 @@
-method:
-  _target_: avalanche.training.EWC
-  ewc_lambda: 1
-  mode: 'separate'
-  keep_importance_data: no
+_target_: avalanche.training.EWC
+ewc_lambda: 1
+mode: 'separate'
+keep_importance_data: no

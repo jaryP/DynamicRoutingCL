@@ -1,10 +1,12 @@
 import os
+from typing import Optional
 
 import torch
 from avalanche.benchmarks import CLExperience
 from avalanche.benchmarks.utils import ConstantSequence
+from avalanche.evaluation import Metric, GenericPluginMetric
 from avalanche.models import MultiHeadClassifier, MultiTaskModule
-from torch import cosine_similarity, nn, optim
+from torch import cosine_similarity, nn, optim, Tensor
 
 
 class CumulativeMultiHeadClassifier(MultiTaskModule):
@@ -166,7 +168,6 @@ def get_save_path(scenario_name: str,
                   model_name: str,
                   exp_n: int = None,
                   sit: bool = False):
-
     base_path = os.getcwd()
     if exp_n is None:
         return os.path.join(base_path,
@@ -191,7 +192,6 @@ def get_optimizer(parameters,
                   lr: float,
                   momentum: float = 0.0,
                   weight_decay: float = 0):
-
     name = name.lower()
     if name == 'adam':
         return optim.Adam(parameters, lr, weight_decay=weight_decay)
@@ -202,6 +202,71 @@ def get_optimizer(parameters,
         raise ValueError('Optimizer must be adam or sgd')
 
 
-# def save_snapshot(path, model, cfg):
-#     d = {'cfg': }
-#
+class TrainableParameters(Metric[int]):
+    def __init__(self):
+        self._compute_cost: Optional[int] = 0
+
+    def update(self, model: nn.Module):
+        self._compute_cost = sum(
+            p.numel() for p in model.parameters() if p.requires_grad)
+
+    def result(self) -> Optional[int]:
+        return self._compute_cost
+
+    def reset(self):
+        self._compute_cost = 0
+
+
+class TrainableParametersPlugin(GenericPluginMetric):
+    """
+    At the end of each experience, this metric reports the
+    MAC computed on a single pattern.
+    This plugin metric only works at eval time.
+    """
+    def __init__(self, reset_at, emit_at, mode):
+        self._trainable_parameters = TrainableParameters()
+
+        super(TrainableParametersPlugin, self).__init__(
+            self._trainable_parameters, reset_at=reset_at, emit_at=emit_at, mode=mode
+        )
+
+    def update(self, strategy):
+        self._trainable_parameters.update(strategy.model)
+
+
+class ExperienceTrainableParameters(TrainableParametersPlugin):
+    """
+    At the end of each experience, this metric reports the
+    MAC computed on a single pattern.
+    This plugin metric only works at eval time.
+    """
+
+    def __init__(self):
+        """
+        Creates an instance of ExperienceMAC metric
+        """
+        super(ExperienceTrainableParameters, self).__init__(
+            reset_at="experience", emit_at="experience", mode="eval"
+        )
+
+    def __str__(self):
+        return "TrainableParameters_exp"
+
+
+class StreamTrainableParameters(TrainableParametersPlugin):
+    """
+    At the end of each experience, this metric reports the
+    MAC computed on a single pattern.
+    This plugin metric only works at eval time.
+    """
+
+    def __init__(self):
+        """
+        Creates an instance of ExperienceMAC metric
+        """
+        super(StreamTrainableParameters, self).__init__(
+            reset_at="stream", emit_at="stream", mode="eval"
+        )
+
+    def __str__(self):
+        return "TrainableParameters_stream"

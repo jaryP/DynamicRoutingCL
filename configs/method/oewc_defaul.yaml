@@ -1,5 +1,0 @@
-method:
-  _target_: avalanche.training.EWC
-  ewc_lambda: 1
-  mode: 'online'
-  keep_importance_data: no

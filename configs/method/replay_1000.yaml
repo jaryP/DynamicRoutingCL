@@ -1,3 +1,2 @@
-method:
-  _target_: avalanche.training.Replay
-  mem_size: 1000
+_target_: avalanche.training.Replay
+mem_size: 1000

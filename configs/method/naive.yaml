@@ -1,4 +1,1 @@
-name: naive
-save_name: naive
-method:
-  _target_: avalanche.training.Naive
+_target_: avalanche.training.Naive
