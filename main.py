@@ -277,7 +277,8 @@ def avalanche_training(cfg: DictConfig):
                                  **model_cfg)
 
             wandb_name = f'{cfg.scenario.dataset}/{cfg.scenario.n_tasks}_{cfg.trainer_name}_{backbone.__class__.__name__}_{exp_n}'
-
+            wandb_dict = OmegaConf.to_container(cfg, resolve=True)
+            wandb_dict['saving_path'] = experiment_path
             eval_plugin = EvaluationPlugin(
                 # StreamAccuracy(),
                 # TrainedExperienceAccuracy(),
@@ -294,9 +295,7 @@ def avalanche_training(cfg: DictConfig):
                 loggers=[TextLogger(),
                          WandBLogger(project_name=cfg.core.project_name,
                                      run_name=wandb_name,
-                                     params={
-                                         'config': OmegaConf.to_container(cfg,
-                                                                          resolve=True)})],
+                                     params={'config': wandb_dict})],
                 strict_checks=False
             )
 
