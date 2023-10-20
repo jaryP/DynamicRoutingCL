@@ -382,7 +382,7 @@ def avalanche_training(cfg: DictConfig):
                     # for i, experience in enumerate(tasks.train_stream):
                     experience = tasks.train_stream[i]
 
-                    eval_streams = [[e] for e in tasks.test_stream[:i + 1]]
+                    # eval_streams = [[e] for e in tasks.test_stream[:i + 1]]
 
                     # res = strategy.train(experiences=experience,
                     #                      eval_streams=eval_streams,
