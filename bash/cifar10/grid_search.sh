@@ -19,13 +19,13 @@ der)
 ewc)
   for lambda in 1 10 100 1000
   do
-    python main.py +scenario=cil_cifar10_5tasks +model="$MODEL" +training=cifar10_5 +method=ewc_default optimizer=adam  device="$DEVICE" method.lambda=$lambda experiment=dev
+    python main.py +scenario=cil_cifar10_5tasks +model="$MODEL" +training=cifar10_5 +method=ewc_default optimizer=adam  device="$DEVICE" method.ewc_lambda=$lambda experiment=dev
   done
 ;;
 oewc)
   for lambda in 1 10 100 1000
   do
-    python main.py +scenario=cil_cifar10_5tasks +model="$MODEL" +training=cifar10_5 +method=oewc_default optimizer=adam  device="$DEVICE" method.lambda=$lambda experiment=dev
+    python main.py +scenario=cil_cifar10_5tasks +model="$MODEL" +training=cifar10_5 +method=oewc_default optimizer=adam  device="$DEVICE" method.ewc_lambda=$lambda experiment=dev
   done
 ;;
 routing)
@@ -39,7 +39,7 @@ routing)
         do
             for gamma in 1 0.5 0.1
             do
-              python main.py +scenario=cil_cifar10_5tasks +model=routing_tiny_rt +training=cifar10_5 +method=routing_cifar10 optimizer=adam device=$DEVICE experiment=dev method.memory_size=$memory method.past_margin=$past_margin  method.future_margin=$future_margin method.past_task_reg=$past_margin_w method.future_task_reg=0.5 method.gamma=$gamma hydra=search
+              python main.py +scenario=cil_cifar10_5tasks +model=routing_tiny_rt +training=cifar10_5 +method=routing_cifar10 optimizer=adam device=$DEVICE experiment=dev method.mem_size=$memory method.past_margin=$past_margin  method.future_margin=$future_margin method.past_task_reg=$past_margin_w method.future_task_reg=0.5 method.gamma=$gamma hydra=search
             done
           done
         done
