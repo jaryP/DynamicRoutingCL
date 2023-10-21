@@ -35,11 +35,13 @@ routing)
     do
       for past_margin_w in 1 0.5 0.1 0.01 0.001
       do
-        for future_margin in 1 2 3 4 5
+#        for future_margin in 1 2 3 4 5
+        for future_margin in 3
         do
-            for gamma in 1 0.5 0.1
+#            for gamma in 1 0.5 0.1
+            for gamma in 1
             do
-              python main.py +scenario=cil_cifar10_5tasks +model=routing_tiny_rt +training=cifar10_5 +method=routing_cifar10 optimizer=adam device=$DEVICE experiment=dev method.mem_size=$memory method.past_margin=$past_margin  method.future_margin=$future_margin method.past_task_reg=$past_margin_w method.future_task_reg=0.5 method.gamma=$gamma hydra=search
+              python main.py +scenario=cil_cifar10_5tasks +model=routing_3l_convblock +training=cifar10_5 +method=routing_cifar10 optimizer=adam device=$DEVICE experiment=dev method.mem_size=$memory method.past_margin=$past_margin  method.future_margin=$future_margin method.past_task_reg=$past_margin_w method.future_task_reg=0.5 method.gamma=$gamma hydra=search
             done
           done
         done
