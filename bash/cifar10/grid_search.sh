@@ -19,16 +19,18 @@ der)
 ewc)
   for lambda in 1 10 100 1000
   do
-    python main.py +scenario=cil_cifar10_5tasks +model="$MODEL" +training=cifar10_5 +method=ewc_default optimizer=adam  device="$DEVICE" method.ewc_lambda=$lambda experiment=dev
+    python main.py +scenario=cil_cifar10_5tasks +model="$MODEL" +training=cifar10_5 +method=ewc_default optimizer=adam  device="$DEVICE" method.ewc_lambda=$lambda experiment=dev hydra=search
   done
 ;;
 oewc)
   for lambda in 1 10 100 1000
   do
-    python main.py +scenario=cil_cifar10_5tasks +model="$MODEL" +training=cifar10_5 +method=oewc_default optimizer=adam  device="$DEVICE" method.ewc_lambda=$lambda experiment=dev
+    python main.py +scenario=cil_cifar10_5tasks +model="$MODEL" +training=cifar10_5 +method=oewc_default optimizer=adam  device="$DEVICE" method.ewc_lambda=$lambda experiment=dev hydra=search
   done
 ;;
 routing)
+#  routing_3l_convblock
+#  routing_3l_convblock_invusage
   for memory in 200 500 1000 2000
   do
     for past_margin in 0.1 0.2 0.3 0.5
@@ -39,15 +41,16 @@ routing)
         for future_margin in 3
         do
 #            for gamma in 1 0.5 0.1
-            for gamma in 1
+            for gamma in 1 0.5 0.1 0.0
             do
-              python main.py +scenario=cil_cifar10_5tasks +model=routing_3l_convblock +training=cifar10_5 +method=routing_cifar10 optimizer=adam device=$DEVICE experiment=dev method.mem_size=$memory method.past_margin=$past_margin  method.future_margin=$future_margin method.past_task_reg=$past_margin_w method.future_task_reg=0.5 method.gamma=$gamma hydra=search
+              python main.py +scenario=cil_cifar10_5tasks +model=$MODEL +training=cifar10_5 +method=routing_cifar10 optimizer=adam device=$DEVICE experiment=dev method.mem_size=$memory method.past_margin=$past_margin  method.future_margin=$future_margin method.past_task_reg=$past_margin_w method.future_task_reg=0.5 method.gamma=$gamma hydra=search
             done
           done
         done
       done
     done
 ;;
+
 #oewc)
 #  python main.py +scenario=cil_cifar10_5tasks +model=resnet20 +training=cifar10_5 +method=oewc_100 optimizer=sgd  training.device="$DEVICE" hydra.run.dir='./results/ci_cifar10/resnet20/oewc/oewc_100'
 #;;
