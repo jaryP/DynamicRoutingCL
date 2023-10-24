@@ -69,22 +69,32 @@ class RoutingModel(MultiTaskModule):
         else:
             assert len(layers_block_n) == len(layers_dims)
 
+        self.conv1 = None
+        input_channels = 3
+
         if pre_conv_channels is not None:
             self.conv1 = nn.Conv2d(3,
                                    pre_conv_channels,
                                    kernel_size=3)
             input_channels = pre_conv_channels
-        else:
-            self.conv1 = None
-            input_channels = 3
 
-        for output_channels, n_blocks in zip(layers_dims, layers_block_n):
-            self.layers.append(BlockRoutingLayer(input_channels=input_channels,
-                                                 output_channels=output_channels,
-                                                 n_blocks=n_blocks,
-                                                 use_batch_normalization=use_batch_normalization,
-                                                 factory=block_factory))
-            input_channels = output_channels
+        blocks_it = iter(layers_block_n)
+
+        for output_channels in layers_dims:
+            if isinstance(output_channels, int):
+                n_blocks = next(blocks_it)
+                self.layers.append(BlockRoutingLayer(input_channels=input_channels,
+                                                     output_channels=output_channels,
+                                                     n_blocks=n_blocks,
+                                                     use_batch_normalization=use_batch_normalization,
+                                                     factory=block_factory))
+                input_channels = output_channels
+            elif isinstance(output_channels, str) and 'mp' in output_channels.lower():
+                self.layers.append(nn.MaxPool2d(2))
+            elif isinstance(output_channels, str) and 'ap' in output_channels.lower():
+                self.layers.append(nn.AvgPool2d(2))
+            else:
+                assert False
 
         # if model_dimension == 'tiny':
         #     self.layers.append(BlockRoutingLayer(3, 32, n_blocks=layers_block_n, block_type=block_type))
@@ -106,7 +116,8 @@ class RoutingModel(MultiTaskModule):
         self.centroids_scaler = nn.ParameterDict()
 
         paths = list(itertools.product(*[range(len(l.blocks))
-                                         for l in self.layers]))
+                                         for l in self.layers
+                                         if isinstance(l, BlockRoutingLayer)]))
         for i, p in enumerate(paths):
             self.centroids[str(i)] = nn.Sequential(nn.Flatten(1),
                                                     # nn.ReLU(),
@@ -140,7 +151,8 @@ class RoutingModel(MultiTaskModule):
 
         if freeze_past_tasks or freeze_future_logits:
             for l in self.layers:
-                l.freeze_blocks()
+                if isinstance(l, BlockRoutingLayer):
+                    l.freeze_blocks()
 
             for p in self.centroids.parameters():
                 p.requires_grad_(False)
@@ -154,12 +166,13 @@ class RoutingModel(MultiTaskModule):
 
     def count_parameters(self):
         used_blocks = dict()
+        layers = [l for l in self.layers if isinstance(l, BlockRoutingLayer)]
         for c, (p, v) in self.assigned_paths.items():
             for i, b in enumerate(p):
                 key = f'{i}_{b}'
                 if key in used_blocks:
                     continue
-                block = self.layers[i].blocks[str(b)]
+                block = layers[i].blocks[str(b)]
                 # used_blocks[key] = self.layers[i].blocks[i]
                 params = sum(p.numel() for p in block.parameters()
                              if p.requires_grad)
@@ -267,7 +280,10 @@ class RoutingModel(MultiTaskModule):
                 for p in self.centroids[str(v)].parameters():
                     p.requires_grad_(False)
 
-                for b, l in zip(pt, self.layers):
+                layers = [l for l in self.layers if
+                          isinstance(l, BlockRoutingLayer)]
+
+                for b, l in zip(pt, layers):
                     l.freeze_block(b)
 
                 # self.centroids_scaler[str(v)] = nn.Parameter(torch.tensor([1.0]))
@@ -289,7 +305,10 @@ class RoutingModel(MultiTaskModule):
                 self.centroids[str(p[1])] = l
 
             if self.freeze_past_tasks or self.freeze_future_logits:
-                for b, l in zip(p[0], self.layers):
+                layers = [l for l in self.layers if
+                          isinstance(l, BlockRoutingLayer)]
+
+                for b, l in zip(p[0], layers):
                     l.freeze_block(b, False)
 
                 for p in self.centroids[str(p[1])].parameters():
@@ -420,12 +439,21 @@ class RoutingModel(MultiTaskModule):
         _x = [x] * len(paths[0])
 
         for l in self.layers[:-1]:
+            if isinstance(l, BlockRoutingLayer):
+                _p = next(paths_iterable)
+                _x, f = l(_x, _p)
+                feats.append(f)
+            else:
+                _x = [l(a) for a in _x]
+
+        ll = self.layers[-1]
+        if isinstance(ll, BlockRoutingLayer):
             _p = next(paths_iterable)
-            _x, f = l(_x, _p)
-
+            _x, f = ll(_x, _p)
             feats.append(f)
-
-        _x, f = self.layers[-1](_x, next(paths_iterable))
+        else:
+            f = [ll(a) for a in _x]
+        # _x, f = self.layers[-1](_x, next(paths_iterable))
 
         # f = nn.functional.avg_pool2d(f, 1).flatten(1)
         # f = [nn.functional.adaptive_avg_pool2d(_f, 1).flatten(1) for _f in f]

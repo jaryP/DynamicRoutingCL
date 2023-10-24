@@ -13,6 +13,5 @@ defaults:
   - _self_
 
 device: cpu
-#trainer:
 trainer_name: ${method_path:${method._target_}}
-
+wandb_prefix: null

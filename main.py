@@ -279,9 +279,15 @@ def avalanche_training(cfg: DictConfig):
                                  is_class_incremental_learning=is_cil,
                                  **model_cfg)
 
+            wandb_prefix = cfg.get('wandb_prefix', '')
+
             wandb_name = f'{cfg.scenario.dataset}/{cfg.scenario.n_tasks}_{cfg.trainer_name}_{backbone.__class__.__name__}_{exp_n}'
+            if wandb_prefix is not None and wandb_prefix != '':
+                wandb_name = wandb_prefix + wandb_name
+
             wandb_dict = OmegaConf.to_container(cfg, resolve=True)
             wandb_dict['saving_path'] = experiment_path
+
             eval_plugin = EvaluationPlugin(
                 # StreamAccuracy(),
                 # TrainedExperienceAccuracy(),
