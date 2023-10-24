@@ -222,6 +222,8 @@ def avalanche_training(cfg: DictConfig):
         results_path = os.path.join(experiment_path, 'last_results.json')
         complete_results_path = os.path.join(experiment_path,
                                              'complete_results.json')
+        complete_results_dev_path = os.path.join(experiment_path,
+                                             'complete_results_dev.json')
 
         train_results_path = os.path.join(experiment_path, 'train_results.json')
 
@@ -236,7 +238,8 @@ def avalanche_training(cfg: DictConfig):
                                         shuffle=shuffle_first if exp_n == 0 else shuffle,
                                         seed=seed, force_sit=force_sit,
                                         method_name=plugin_name,
-                                        dev_split=training.get('dev_split', None))
+                                        dev_split=training.get('dev_split',
+                                                               None))
 
         log.info(f'Original classes: {tasks.classes_order_original_ids}')
         log.info(f'Original classes per exp: {tasks.original_classes_in_exp}')
@@ -295,7 +298,8 @@ def avalanche_training(cfg: DictConfig):
                 loggers=[TextLogger(),
                          WandBLogger(project_name=cfg.core.project_name,
                                      run_name=wandb_name,
-                                     params={'config': wandb_dict})],
+                                     params={'config': wandb_dict})
+                         ],
                 strict_checks=False
             )
 
@@ -350,6 +354,7 @@ def avalanche_training(cfg: DictConfig):
 
             results_after_each_task = []
             all_results = {}
+            all_results_dev = {}
 
             indexes = np.arange(len(tasks.train_stream))
 
@@ -389,16 +394,20 @@ def avalanche_training(cfg: DictConfig):
                     #                      num_workers=num_workers)
 
                     res = strategy.train(experiences=experience,
-                                         eval_streams=[tasks.test_stream[:i + 1]],
+                                         eval_streams=[
+                                             tasks.test_stream[:i + 1]],
                                          pin_memory=pin_memory,
                                          num_workers=num_workers)
 
-                    # strag_eval = strategy.eval(tasks.test_stream[:i + 1],
-                    #                            pin_memory=pin_memory,
-                    #                            num_workers=num_workers)
-
                     all_results = strategy.evaluator.get_all_metrics()
-                    print(all_results, res)
+
+                    if eval_every < 0:
+                        all_results_dev = strategy.eval(tasks.test_stream[:i + 1],
+                                                        pin_memory=pin_memory,
+                                                        num_workers=num_workers)
+
+
+                    log.info(res)
 
                     if save_states:
                         torch.save(strategy,
@@ -421,6 +430,9 @@ def avalanche_training(cfg: DictConfig):
 
             with open(complete_results_path, 'w') as f:
                 json.dump(all_results, f, ensure_ascii=False, indent=4)
+
+            with open(complete_results_dev_path, 'w') as f:
+                json.dump(all_results_dev, f, ensure_ascii=False, indent=4)
 
         for res in results_after_each_task:
             average_accuracy = []

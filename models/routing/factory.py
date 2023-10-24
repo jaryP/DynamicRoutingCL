@@ -23,7 +23,9 @@ def get_conv_block(input_channels, output_channels,
 
 def get_double_conv_block(input_channels, output_channels):
     return nn.Sequential(get_conv_block(input_channels, output_channels),
-                         get_conv_block(output_channels, output_channels))
+                         get_conv_block(output_channels, output_channels),
+                         # nn.MaxPool2d(2)
+                         )
 
 
 def get_resnet_block(input_channels, output_channels):

@@ -207,8 +207,11 @@ class TrainableParameters(Metric[int]):
         self._compute_cost: Optional[int] = 0
 
     def update(self, model: nn.Module):
-        self._compute_cost = sum(
-            p.numel() for p in model.parameters() if p.requires_grad)
+        if hasattr(model, 'count_parameters'):
+            self._compute_cost = model.count_parameters()
+        else:
+            self._compute_cost = sum(
+                p.numel() for p in model.parameters() if p.requires_grad)
 
     def result(self) -> Optional[int]:
         return self._compute_cost

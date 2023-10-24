@@ -132,6 +132,7 @@ class BlockRoutingLayer(DynamicModule):
                  n_blocks: int,
                  factory,
                  project_dim=None,
+                 use_batch_normalization=False,
                  get_average_features=False,
                  # out_project_dim = None,
                  **kwargs):
@@ -151,6 +152,9 @@ class BlockRoutingLayer(DynamicModule):
             #               stride=1)
 
             b = factory(self.input_channels, self.output_channels)
+            if use_batch_normalization:
+                b = nn.Sequential(b, nn.BatchNorm2d(output_channels))
+
             i = str(i)
             self.blocks[i] = b
 
@@ -212,29 +216,35 @@ class BlockRoutingLayer(DynamicModule):
                 p.requires_grad_(freeze)
 
     def forward(self, x, block_id, **kwargs):
-        if isinstance(block_id, (list, tuple)):
-            ret = []
-            ret_l = []
+        if not isinstance(block_id, (list, tuple)):
+            x = [x]
+            block_id = [block_id]
 
-            for _x, _bid in zip(x, block_id):
-                f = self.blocks[str(_bid)](_x).relu()
-                if len(self.projectors) > 0:
-                    l = self.projectors[str(_bid)](f)
-                    ret_l.append(l)
-                else:
-                    ret_l.append(f)
+        # if isinstance(block_id, (list, tuple)):
+        ret = []
+        ret_l = []
 
-                ret.append(f)
+        for _x, _bid in zip(x, block_id):
+            f = self.blocks[str(_bid)](_x).relu()
 
-            if len(ret_l) > 0:
-                return ret, ret_l
-            return ret, None
-        else:
-            f = self.blocks[str(block_id)](x)
-            l = None
             if len(self.projectors) > 0:
-                l = self.projectors[str(block_id)](f)
+                l = self.projectors[str(_bid)](f)
+                ret_l.append(l)
+            else:
+                ret_l.append(f)
 
-            if l is not None:
-                return f, l
-            return f
+            ret.append(f)
+
+        if len(ret_l) > 0:
+            return ret, ret_l
+
+        return ret, None
+        # else:
+        #     f = self.blocks[str(block_id)](x)
+        #     l = None
+        #     if len(self.projectors) > 0:
+        #         l = self.projectors[str(block_id)](f)
+        #
+        #     if l is not None:
+        #         return f, l
+        #     return f

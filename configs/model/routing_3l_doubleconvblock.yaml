@@ -1,9 +1,10 @@
 _target_: models.RoutingModel
 layers_dims: [32, 56, 128]
-layers_block_n: [2, 3, 5]
+layers_block_n: 5
 future_paths_to_sample: 5
 path_selection_strategy: 'random'
 prediction_mode: 'task'
+use_batch_normalization: No
 block_factory:
   _target_: hydra.utils.get_method
   path: models.routing.factory.get_double_conv_block

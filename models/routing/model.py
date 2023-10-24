@@ -20,8 +20,10 @@ class RoutingModel(MultiTaskModule):
                  freeze_past_tasks=False,
                  freeze_future_logits=True,
                  freeze_projectors=False,
+                 use_batch_normalization=False,
                  future_paths_to_sample=5,
                  sample_wise_future_sampling=False,
+                 pre_conv_channels=None,
                  path_selection_strategy='random',
                  prediction_mode='task',
                  **kwargs):
@@ -62,17 +64,25 @@ class RoutingModel(MultiTaskModule):
 
         self.layers = nn.ModuleList()
 
-        input_channels = 3
-
         if not isinstance(layers_block_n, Sequence):
             layers_block_n = [layers_block_n] * len(layers_dims)
         else:
             assert len(layers_block_n) == len(layers_dims)
 
+        if pre_conv_channels is not None:
+            self.conv1 = nn.Conv2d(3,
+                                   pre_conv_channels,
+                                   kernel_size=3)
+            input_channels = pre_conv_channels
+        else:
+            self.conv1 = None
+            input_channels = 3
+
         for output_channels, n_blocks in zip(layers_dims, layers_block_n):
             self.layers.append(BlockRoutingLayer(input_channels=input_channels,
                                                  output_channels=output_channels,
                                                  n_blocks=n_blocks,
+                                                 use_batch_normalization=use_batch_normalization,
                                                  factory=block_factory))
             input_channels = output_channels
 
@@ -84,6 +94,7 @@ class RoutingModel(MultiTaskModule):
         # if cumulative:
         #     self.in_features = 32 + 64 + 128
         # else:
+
         self.in_features = output_channels
 
         self.classifiers = nn.ParameterDict()
@@ -140,6 +151,21 @@ class RoutingModel(MultiTaskModule):
         v = len(experience.classes_seen_so_far) - self.n_classes_seen_so_far
         if v > 0:
             self.forced_future = v
+
+    def count_parameters(self):
+        used_blocks = dict()
+        for c, (p, v) in self.assigned_paths.items():
+            for i, b in enumerate(p):
+                key = f'{i}_{b}'
+                if key in used_blocks:
+                    continue
+                block = self.layers[i].blocks[str(b)]
+                # used_blocks[key] = self.layers[i].blocks[i]
+                params = sum(p.numel() for p in block.parameters()
+                             if p.requires_grad)
+                used_blocks[key] = params
+
+        return sum(used_blocks.values())
 
     def train_adaptation(self, experience):
         if not self.adapt:
@@ -387,6 +413,10 @@ class RoutingModel(MultiTaskModule):
 
         paths = list(zip(*[p for p, _ in to_iter]))
         paths_iterable = iter(paths)
+
+        if self.conv1 is not None:
+            x = self.conv1(x)
+
         _x = [x] * len(paths[0])
 
         for l in self.layers[:-1]:

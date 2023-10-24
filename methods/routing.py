@@ -96,172 +96,7 @@ class ContinuosRouting(SupervisedTemplate):
     def _after_training_exp(self, **kwargs):
         self._after_training_exp_f(**kwargs)
 
-        # centroids = self.model.centroids
-        # paths = self.model.paths_per_class
-        #
-        # for _, v in paths.values():
-        #     v = str(v)
-        #     if v not in self.past_centroids:
-        #         c = deepcopy(centroids[str(v)].data)
-        #         self.past_centroids[str(v)] = c
-
         super()._after_training_exp(**kwargs)
-
-        # tid = self.experience.current_experience
-        # current_classes = self.experience.classes_in_this_experience
-        # self.model.eval()
-        #
-        # # dataset = strategy.experience.dataset
-        # # dataset_idx = np.arange(len(dataset))
-        # # np.random.shuffle(dataset_idx)
-        # #
-        # # idx_to_get = dataset_idx[:self.patterns_per_experience]
-        # # memory = dataset.train().subset(idx_to_get)
-        # # self.past_dataset[tid] = memory
-        #
-        # # if tid > 0:
-        # # self.past_model = clone_module(strategy.model)
-        # # # a = self.past_model.train()(strategy.mb_x, task_labelels=None)
-        # # self.past_model.adapt = False
-        # # self.past_model.eval()
-        #
-        # samples_to_save = self.memory_size // len(self.experience.classes_seen_so_far)
-        # # samples_to_save = self.memory_size
-        # # if self.centroids is None:
-        # #     self.centroids = self.model.get_centroids()
-        # # else:
-        # #     c = strategy.model.get_centroids()[current_classes]
-        # #     self.centroids = torch.cat((self.centroids, c), 0)
-        # # classes = strategy.experience.classes_in_this_experience
-        # # self.tasks_nclasses[strategy.experience.task_label] = classes
-        # #
-        # # # return
-        # # tid = strategy.experience.current_experience
-        # #
-        # # if tid > 0:
-        # #     with torch.no_grad():
-        # #         strategy.model.eval()
-        # #         for v, d in strategy.past_dataset.items():
-        # #             logits = []
-        # #             for x, y, _, l, e in DataLoader(d.eval(),
-        # #                                             batch_size=strategy.train_mb_size):
-        # #                 _l, _, _ = strategy.model.eval()(x.to(strategy.device))
-        # #                 _l = _l.cpu()
-        # #                 # _l = strategy.model.eval()(x.to(strategy.device)).cpu()
-        # #                 l = torch.cat((l, _l[:, l.shape[-1]:]), -1)
-        # #                 logits.append(l)
-        # #
-        # #             logits = torch.cat(logits, 0)
-        # #             d.logits = logits
-        # #
-        # #     strategy.model.train()
-        #
-        # with torch.no_grad():
-        #     # if tid > 0:
-        #     for k, d in self.past_dataset.items():
-        #         indexes = np.arange(len(d))
-        #
-        #         if len(indexes) > samples_to_save:
-        #             selected = np.random.choice(indexes, samples_to_save, False)
-        #             d = d.train().subset(selected)
-        #             self.past_dataset[k] = d
-        #
-        #             # logits = []
-        #             # for x, y, _, l, e in DataLoader(d.eval(), batch_size=self.train_mb_size):
-        #             #     _l, _, _ = self.model.eval()(x.to(self.device))
-        #             #     _l = _l.cpu()
-        #             #     # _l = strategy.model.eval()(x.to(strategy.device)).cpu()
-        #             #     l = torch.cat((l, _l[:, l.shape[-1]:]), -1)
-        #             #     logits.append(l)
-        #             #
-        #             # logits = torch.cat(logits, 0)
-        #             # d.logits = logits
-        #             #
-        #             # self.past_dataset[k] = d
-        #
-        # # all_features = defaultdict(list)
-        # #
-        # # all_logits = []
-        # # features = []
-        # # ys = []
-        # #
-        # # indexes = defaultdict(list)
-        # # classes_count = defaultdict(int)
-        # #
-        # # selected_indexes = []
-        # # selected_logits = []
-        # # selected_fetures = []
-        # #
-        # # self.model.eval()
-        # # dataset = self.experience.dataset.eval()
-        # # device = self.device
-        # #
-        # # with torch.no_grad():
-        # #     for i, (x, y, t) in enumerate(DataLoader(dataset)):
-        # #         x = x.to(device)
-        # #         y = y.item()
-        # #
-        # #         logits, f, _ = self.model(x)
-        # #         f = f[0:1, y]
-        # #         f = f.cpu().numpy()
-        # #
-        # #         all_features[y].append(f[0, y])
-        # #
-        # #         features.append(f)
-        # #         ys.append(y)
-        # #
-        # #         all_logits.append(logits.cpu().numpy())
-        # #         indexes[y].append(i)
-        # #         classes_count[y] += 1
-        # #
-        # #     n_values = sum(classes_count.values())
-        # #     classes_count = {k: v / n_values
-        # #                      for k, v in classes_count.items()}
-        # #
-        # #     all_logits = np.concatenate(all_logits)
-        # #     features = np.concatenate(features)
-        # #     ys = np.asarray(ys)
-        # #
-        # #     for y in np.unique(ys):
-        # #         mask = ys == y
-        # #         f = features[mask]
-        # #         indexes = np.argwhere(mask).reshape(-1)
-        # #
-        # #         km = KMeans(n_clusters=4).fit(f)
-        # #         # km = AffinityPropagation().fit(f)
-        # #         centroids = km.cluster_centers_
-        # #         centroids = torch.tensor(centroids)
-        # #
-        # #         f = torch.tensor(f)
-        # #         distances = calculate_distance(f, centroids)
-        # #         closest_one = distances.argmin(-1).numpy()
-        # #
-        # #         unique_centroids = np.unique(closest_one)
-        # #         sample_per_centroid = int(
-        # #             samples_to_save * classes_count[y]) // len(unique_centroids)
-        # #
-        # #         for i in unique_centroids:
-        # #             mask = closest_one == i
-        # #             _indexes = indexes[mask]
-        # #
-        # #             selected = np.random.choice(_indexes,
-        # #                                         min(sample_per_centroid,
-        # #                                             len(_indexes)),
-        # #                                         False)
-        # #
-        # #             selected_logits.append(all_logits[selected])
-        # #             selected_fetures.append(features[selected])
-        # #             selected_indexes.extend(selected.tolist())
-        # #
-        # # task_memory = dataset.train().subset(selected_indexes)
-        # # logits = torch.cat([torch.tensor(l) for l in selected_logits])
-        # # features = torch.cat([torch.tensor(f) for f in selected_fetures])
-        # #
-        # # ld = LogitsDataset(task_memory, logits, features, current_classes)
-        # #
-        # # self.model.train()
-        # #
-        # # self.past_dataset[tid] = ld
 
     def sample_past_batch(self, batch_size):
         if len(self.past_dataset) == 0:
@@ -438,9 +273,6 @@ class ContinuosRouting(SupervisedTemplate):
     @torch.no_grad()
     def _before_training_exp(self, **kwargs):
 
-        # classes = self.experience.classes_in_this_experience
-        # self.tasks_nclasses[self.experience.task_label] = classes
-
         super()._before_training_exp(**kwargs)
 
         if self.model is not None:
@@ -491,12 +323,12 @@ class ContinuosRouting(SupervisedTemplate):
 
             w = 1
             if self.warm_up_epochs > 0:
-                # w = float(self.clock.train_exp_epochs / self.warm_up_epochs >= 1)
-                w = self.clock.train_exp_epochs / self.warm_up_epochs
+                w = float(self.clock.train_exp_epochs / self.warm_up_epochs >= 1)
+                # w = self.clock.train_exp_epochs / self.warm_up_epochs
 
             if w >= 1 and self.past_margin > 0 and self.past_task_reg > 0:
-                # mx = neg_pred1.max(-1).values.detach()
-                mx = neg_pred1.max(-1).values
+                mx = neg_pred1.max(-1).values.detach()
+                # mx = neg_pred1.max(-1).values
                 mx_current_classes = pred1[range(len(pred1)), y1]
 
                 margin_dist = torch.maximum(torch.zeros_like(mx), mx - mx_current_classes + self.past_margin)
