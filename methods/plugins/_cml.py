@@ -297,13 +297,13 @@ class CentroidsMatching(StrategyPlugin):
         with torch.no_grad():
             tid = strategy.experience.current_experience
 
-            # centroids = self.calculate_centroids(strategy,
+            # heads = self.calculate_centroids(strategy,
             #                                      strategy.experience.
             #                                      dev_dataset)
 
             # if self.sit:
-            #     centroids = self.tasks_centroids + [self.current_centroids]
-            #     centroids = self.combine_centroids(centroids)
+            #     heads = self.tasks_centroids + [self.current_centroids]
+            #     heads = self.combine_centroids(heads)
             # else:
 
             centroids = self.current_centroids.detach()
@@ -566,8 +566,8 @@ class CentroidsMatching(StrategyPlugin):
     def combine_centroids(self, centroids):
         centroids = [self.scaler(c, task) for task, c in enumerate(centroids)]
 
-        # centroids = [self.scaler(centroids[t], t)
-        #              for t in range(len(centroids) - 1)] + [centroids[-1]]
+        # heads = [self.scaler(heads[t], t)
+        #              for t in range(len(heads) - 1)] + [heads[-1]]
 
         centroids = torch.cat(centroids, 0)
 
@@ -1320,7 +1320,7 @@ class _CentroidsMatching(StrategyPlugin):
         # if self.sit and len(self.tasks_centroids) > 0:
         #     centroids_means = torch.cat(self.tasks_centroids, 0).sum(0,
         #                                                              keepdims=True)
-        #     centroids += centroids_means
+        #     heads += centroids_means
 
         return centroids
 
@@ -1386,18 +1386,18 @@ class _CentroidsMatching(StrategyPlugin):
         #         [self.custom_forward(strategy.model, x, task)
         #          for task in range(len(offsets_tensor))])
         #
-        #     centroids = torch.cat([self.scaler(c, task)
+        #     heads = torch.cat([self.scaler(c, task)
         #                            for task, c in
         #                            enumerate(chain(self.tasks_centroids,
-        #                                            [centroids]))], 0)
+        #                                            [heads]))], 0)
         #
-        #     loss = self._loss_f(e, y, centroids)
+        #     loss = self._loss_f(e, y, heads)
         #     loss_val = loss.view(-1).mean()
         #
         # else:
         # if self.sit and len(self.tasks_centroids) > 0:
         #     c = torch.cat(self.tasks_centroids, 0)
-        #     centroids = torch.cat((c, centroids), 0)
+        #     heads = torch.cat((c, heads), 0)
 
         self.current_centroids = centroids
 
@@ -1541,7 +1541,7 @@ class _CentroidsMatching(StrategyPlugin):
             # e = self.embs_proj([self.custom_forward(strategy.model, x, task)
             #                     for task in range(num_tasks)])
 
-            # centroids = torch.cat([c + self.scaler[task]
+            # heads = torch.cat([c + self.scaler[task]
             #                        for task, c in
             #                        enumerate(self.tasks_centroids)],
             #                       0)

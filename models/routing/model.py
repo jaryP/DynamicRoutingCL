@@ -1,5 +1,6 @@
 import itertools
-from typing import Sequence, Tuple, Any, Union, Optional, Callable
+from copy import deepcopy
+from typing import Sequence, Tuple, Any, Union, Optional, Callable, List
 
 import numpy as np
 import torch
@@ -7,37 +8,68 @@ from avalanche.models import MultiTaskModule
 from torch import nn, Tensor
 from torch.utils.data import DataLoader
 
-from models.routing.factory import get_conv_block
 from models.routing.layers import BlockRoutingLayer
+
+
+class FactoryWrapper(nn.Module):
+    def __init__(self, module: nn.Module, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        parameters = len(list(module.parameters()))
+        self.module = module
+
+        if parameters == 0:
+            self._mode = self._no_parameters
+            self.is_trainable = False
+        else:
+            self._mode = self._with_parameters
+            self.is_trainable = True
+
+    def _no_parameters(self):
+        return deepcopy(self.module)
+
+    def _with_parameters(self):
+        module = deepcopy(self.module)
+        for m in module.modules():
+            if hasattr(m, 'reset_parameters'):
+                m.reset_parameters()
+        return module
+
+    def __call__(self, *args, **kwargs):
+        module = self._mode()
+        for m in module.children():
+            if hasattr(m, 'reset_running_stats'):
+                m.reset_running_stats()
+
+        return module
 
 
 class RoutingModel(MultiTaskModule):
     def __init__(self,
-                 layers_dims,
-                 layers_block_n,
-                 block_factory: Callable = get_conv_block,
-                 cumulative=False,
-                 freeze_past_tasks=False,
-                 freeze_future_logits=True,
-                 freeze_projectors=False,
-                 use_batch_normalization=False,
-                 future_paths_to_sample=5,
-                 sample_wise_future_sampling=False,
-                 pre_conv_channels=None,
-                 path_selection_strategy='random',
-                 prediction_mode='task',
+                 layers: List[nn.Module],
+                 layers_block_n: Union[Sequence[int], int],
+                 backbone_output_dim: int,
+                 *,
+                 head_topology: Optional[Callable] = None,
+                 cumulative: bool = False,
+                 freeze_past_tasks: bool = False,
+                 freeze_future_logits: bool = True,
+                 freeze_projectors: bool = False,
+                 future_paths_to_sample: int = 5,
+                 sample_wise_future_sampling: bool = False,
+                 pre_process_module: nn.Module = None,
+                 path_selection_strategy: str = 'random',
+                 prediction_mode: str = 'task',
                  **kwargs):
 
         super().__init__()
-
-        # assert model_dimension in ['tiny', 'small']
-        # assert block_type in ['conv', 'small']
 
         self.forced_future = 0
 
         self.internal_features = None
         self.current_features = None
-        self.centroids = None
+        self.head_topology = head_topology
+        self.backbone_output_dim = backbone_output_dim
 
         self.use_future = True
         self.cumulative = cumulative
@@ -55,95 +87,52 @@ class RoutingModel(MultiTaskModule):
                                            'negative_usage',
                                            'gradient']
 
-        # assert path_selection_strategy in ['random', 'usage']
-
         assert prediction_mode in ['class', 'task']
 
-        self.distance = 'cosine'
         self.adapt = True
 
         self.layers = nn.ModuleList()
+        self.heads = nn.ModuleList()
+
+        self.pre_process = pre_process_module
+
+        blocks_f = [FactoryWrapper(m) for m in layers]
+        trainable_blocks = len([f for f in blocks_f if f.is_trainable])
 
         if not isinstance(layers_block_n, Sequence):
-            layers_block_n = [layers_block_n] * len(layers_dims)
+            layers_block_n = [layers_block_n] * trainable_blocks
         else:
-            assert len(layers_block_n) == len(layers_dims)
-
-        self.conv1 = None
-        input_channels = 3
-
-        if pre_conv_channels is not None:
-            self.conv1 = nn.Conv2d(3,
-                                   pre_conv_channels,
-                                   kernel_size=3)
-            input_channels = pre_conv_channels
+            assert len(
+                layers_block_n) == trainable_blocks, f'The number of blocks per each layer must be equal to the number of trainable layers ({trainable_blocks}, {len(layers_block_n)})'
 
         blocks_it = iter(layers_block_n)
 
-        for output_channels in layers_dims:
-            if isinstance(output_channels, int):
+        for factory in blocks_f:
+            if factory.is_trainable:
                 n_blocks = next(blocks_it)
-                self.layers.append(BlockRoutingLayer(input_channels=input_channels,
-                                                     output_channels=output_channels,
-                                                     n_blocks=n_blocks,
-                                                     use_batch_normalization=use_batch_normalization,
-                                                     factory=block_factory))
-                input_channels = output_channels
-            elif isinstance(output_channels, str) and 'mp' in output_channels.lower():
-                self.layers.append(nn.MaxPool2d(2))
-            elif isinstance(output_channels, str) and 'ap' in output_channels.lower():
-                self.layers.append(nn.AvgPool2d(2))
+                self.layers.append(BlockRoutingLayer(factory=factory,
+                                                     n_blocks=n_blocks))
             else:
-                assert False
-
-        # if model_dimension == 'tiny':
-        #     self.layers.append(BlockRoutingLayer(3, 32, n_blocks=layers_block_n, block_type=block_type))
-        #     self.layers.append(BlockRoutingLayer(32, 64, n_blocks=layers_block_n, block_type=block_type))
-        #     self.layers.append(BlockRoutingLayer(64, 128, project_dim=128, n_blocks=layers_block_n, block_type=block_type))
-
-        # if cumulative:
-        #     self.in_features = 32 + 64 + 128
-        # else:
-
-        self.in_features = output_channels
+                self.layers.append(factory())
 
         self.classifiers = nn.ParameterDict()
 
         self.gates = nn.ModuleDict()
         self.translate = nn.ModuleDict()
 
-        self.centroids = nn.ModuleDict()
+        self.heads = nn.ModuleDict()
         self.centroids_scaler = nn.ParameterDict()
 
         paths = list(itertools.product(*[range(len(l.blocks))
                                          for l in self.layers
                                          if isinstance(l, BlockRoutingLayer)]))
         for i, p in enumerate(paths):
-            self.centroids[str(i)] = nn.Sequential(nn.Flatten(1),
-                                                    # nn.ReLU(),
-                                                    # CosineLinearLayer(self.in_features),
-                                                    # ConcatLinearLayer(self.in_features, 100)
-                                                    nn.Sequential(nn.ReLU(),
-                                                                  nn.Linear(
-                                                                      self.in_features,
-                                                                      1)),
-                                                    # nn.Sigmoid()
-                                                    )
+            self.heads[str(i)] = nn.Sequential(nn.Flatten(1),
+                                               nn.Sequential(nn.Linear(
+                                                   self.backbone_output_dim,
+                                                   1)),
+                                               )
             paths[i] = (p, i)
-
-        # while len(paths) < 100:
-        #     b = [np.random.randint(0, l) for l in layers_blocks]
-        #     if b not in paths:
-        #         ln = len(paths)
-        #         v = (b, ln)
-        #         self.centroids[str(ln)] = nn.Sequential(nn.Flatten(1),
-        #                                                 # nn.ReLU(),
-        #                                                 # CosineLinearLayer(self.in_features),
-        #                                                 # ConcatLinearLayer(self.in_features, 100)
-        #                                                 nn.Sequential(nn.ReLU(), nn.Linear(self.in_features, 1)),
-        #                                                 # nn.Sigmoid()
-        #                                                 )
-        #         paths.append(v)
 
         self.available_paths = paths
         self.assigned_paths = {}
@@ -154,7 +143,7 @@ class RoutingModel(MultiTaskModule):
                 if isinstance(l, BlockRoutingLayer):
                     l.freeze_blocks()
 
-            for p in self.centroids.parameters():
+            for p in self.heads.parameters():
                 p.requires_grad_(False)
 
     def eval_adaptation(self, experience):
@@ -173,7 +162,6 @@ class RoutingModel(MultiTaskModule):
                 if key in used_blocks:
                     continue
                 block = layers[i].blocks[str(b)]
-                # used_blocks[key] = self.layers[i].blocks[i]
                 params = sum(p.numel() for p in block.parameters()
                              if p.requires_grad)
                 used_blocks[key] = params
@@ -189,13 +177,15 @@ class RoutingModel(MultiTaskModule):
         self.n_classes_seen_so_far += task_classes
         to_samples = task_classes if self.prediction_mode == 'class' else 1
 
-        if self.path_selection_strategy == 'random' or len(self.assigned_paths) == 0:
-            selected_paths = np.random.choice(np.arange(len(self.available_paths)),
-                                              to_samples,
-                                              replace=False)
+        if self.path_selection_strategy == 'random' or len(
+                self.assigned_paths) == 0:
+            selected_paths = np.random.choice(
+                np.arange(len(self.available_paths)),
+                to_samples,
+                replace=False)
             paths = [self.available_paths[i] for i in selected_paths]
 
-        elif 'usage'in self.path_selection_strategy:
+        elif 'usage' in self.path_selection_strategy:
             probs = []
 
             used_blocks = set()
@@ -222,10 +212,11 @@ class RoutingModel(MultiTaskModule):
 
             probs = probs / sum(probs)
 
-            selected_paths = np.random.choice(np.arange(len(self.available_paths)),
-                                              to_samples,
-                                              replace=False,
-                                              p=probs)
+            selected_paths = np.random.choice(
+                np.arange(len(self.available_paths)),
+                to_samples,
+                replace=False,
+                p=probs)
 
             paths = [self.available_paths[i] for i in selected_paths]
 
@@ -244,18 +235,20 @@ class RoutingModel(MultiTaskModule):
             with torch.enable_grad():
                 for x in xs:
                     past_paths = list(self.assigned_paths.values())
-                    features, past_logits, _ = self.features(x, paths_to_use=past_paths)
+                    features, past_logits, _ = self.features(x,
+                                                             paths_to_use=past_paths)
 
                     past_max = past_logits.max(-1).values.detach()
                     best_val = (np.inf, None)
 
                     for i in range(0, len(self.available_paths), 10):
-                        pts = self.available_paths[i:i+10]
+                        pts = self.available_paths[i:i + 10]
 
                         features, logits, _ = self.features(x, paths_to_use=pts)
 
                         alphas = nn.Parameter(torch.ones((1, logits.shape[-1]),
-                                                         device=next(self.parameters()).device))
+                                                         device=next(
+                                                             self.parameters()).device))
                         logits = logits * alphas
 
                         diff = past_max[:, None] - logits
@@ -277,7 +270,7 @@ class RoutingModel(MultiTaskModule):
         if self.freeze_past_tasks:
             for pt, v in self.assigned_paths.values():
 
-                for p in self.centroids[str(v)].parameters():
+                for p in self.heads[str(v)].parameters():
                     p.requires_grad_(False)
 
                 layers = [l for l in self.layers if
@@ -286,23 +279,17 @@ class RoutingModel(MultiTaskModule):
                 for b, l in zip(pt, layers):
                     l.freeze_block(b)
 
-                # self.centroids_scaler[str(v)] = nn.Parameter(torch.tensor([1.0]))
-
-            # print(self.centroids[str(v)])
-
-        # for b, l in zip(zip(*[p[0] for p in paths]), self.layers):
-        #     l.activate_blocks(b)
-
         z = experience.classes_in_this_experience \
-            if self.prediction_mode == 'class' else [len(self.assigned_paths) + 1]
+            if self.prediction_mode == 'class' else [
+            len(self.assigned_paths) + 1]
 
         for c, p in zip(z, paths):
             self.available_paths.remove(p)
             self.assigned_paths[c] = p
 
             if self.prediction_mode == 'task':
-                l = nn.Linear(self.in_features, task_classes)
-                self.centroids[str(p[1])] = l
+                l = nn.Linear(self.backbone_output_dim, task_classes)
+                self.heads[str(p[1])] = l
 
             if self.freeze_past_tasks or self.freeze_future_logits:
                 layers = [l for l in self.layers if
@@ -311,19 +298,19 @@ class RoutingModel(MultiTaskModule):
                 for b, l in zip(p[0], layers):
                     l.freeze_block(b, False)
 
-                for p in self.centroids[str(p[1])].parameters():
+                for p in self.heads[str(p[1])].parameters():
                     p.requires_grad_(True)
 
         if self.freeze_projectors:
             for _, v in self.assigned_paths.values():
-                for p in self.centroids[str(v)].parameters():
+                for p in self.heads[str(v)].parameters():
                     p.requires_grad_(False)
 
         print(self.assigned_paths)
 
     def forward(self,
                 x: torch.Tensor,
-                task_labels = None,
+                task_labels=None,
                 other_paths: list = None,
                 **kwargs) \
             -> Tuple[
@@ -358,7 +345,7 @@ class RoutingModel(MultiTaskModule):
         #             lg = []
         #
         #             for i, (_, v) in enumerate(random_paths):
-        #                 l = self.centroids[str(v)](f[:, i])
+        #                 l = self.heads[str(v)](f[:, i])
         #
         #                 if self.freeze_past_tasks and str(
         #                         v) in self.centroids_scaler:
@@ -387,7 +374,6 @@ class RoutingModel(MultiTaskModule):
             random_paths += [self.available_paths[p] for p in sampled_paths]
 
         self.current_random_paths = random_paths
-        # all_paths = base_paths + random_paths
 
         if len(base_paths) > 0:
             features, logits, _ = self.features(x, paths_to_use=base_paths)
@@ -416,11 +402,6 @@ class RoutingModel(MultiTaskModule):
             if isinstance(paths_to_use, Sequence):
                 if any(isinstance(v, int) for v in paths_to_use):
                     assert False
-            #     paths_to_use = list(paths_to_use)
-            # elif (isinstance(paths_to_use, list)
-            #       and any(isinstance(v, int) for v in paths_to_use)):
-            #
-            #     assert False
             elif paths_to_use == 'all':
                 paths_to_use = self.available_paths
 
@@ -433,8 +414,8 @@ class RoutingModel(MultiTaskModule):
         paths = list(zip(*[p for p, _ in to_iter]))
         paths_iterable = iter(paths)
 
-        if self.conv1 is not None:
-            x = self.conv1(x)
+        if self.pre_process is not None:
+            x = self.pre_process(x)
 
         _x = [x] * len(paths[0])
 
@@ -453,27 +434,12 @@ class RoutingModel(MultiTaskModule):
             feats.append(f)
         else:
             f = [ll(a) for a in _x]
-        # _x, f = self.layers[-1](_x, next(paths_iterable))
 
-        # f = nn.functional.avg_pool2d(f, 1).flatten(1)
-        # f = [nn.functional.adaptive_avg_pool2d(_f, 1).flatten(1) for _f in f]
-
-        # if self.cumulative:
-        #    feats.append(f)
-        # else:
-        #     feats.append(_x)
-
-        # if self.cumulative:
-        #     feats = [torch.cat(l, -1 )for l in list(zip(*feats))]
-        #     features = torch.stack(feats, 1)
-        # else:
         features = torch.stack(f, 1)
-        features = nn.functional.adaptive_avg_pool2d(features, 1).flatten(2)
-        # logits = torch.stack(f, 1).relu()
 
         logits = []
         for i, (_, v) in enumerate(paths_to_use):
-            l = self.centroids[str(v)](features[:, i])
+            l = self.heads[str(v)](features[:, i])
 
             if self.freeze_past_tasks and str(v) in self.centroids_scaler:
                 l = l / self.centroids_scaler[str(v)]
@@ -482,4 +448,3 @@ class RoutingModel(MultiTaskModule):
         logits = torch.cat(logits, 1)
 
         return features, logits, feats
-

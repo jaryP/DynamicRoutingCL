@@ -109,7 +109,7 @@ def get_backbone(name: str, channels: int = 3):
                 self.model = m
 
             def forward(self, x, task_label=None, **kwargs):
-                out = F.relu(self.model.bn1(self.model.conv1(x)))
+                out = F.relu(self.model.bn1(self.model.pre_process(x)))
                 out = self.model.layer1(out)
                 out = self.model.layer2(out)
                 out = self.model.layer3(out)
