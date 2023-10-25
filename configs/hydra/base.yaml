@@ -1,6 +1,5 @@
-#hydra:
 run:
-  dir: results/${scenario.scenario}/${trainer_name}/${hydra.job.override_dirname}
+  dir: results/${scenario.scenario}/${trainer_name}/${process_saving_path:${hydra.job.override_dirname}}
 sweep:
   dir: results/multirun/${scenario.scenario}/${method.save_name}
   subdir: ${hydra.job.override_dirname}
@@ -8,6 +7,6 @@ job:
   chdir: True
   config:
     override_dirname:
-      exclude_keys: ['device', 'training', 'experiment', 'wandb_prefix']
+      exclude_keys: ['device', 'training', 'experiment', 'hydra', 'wandb_prefix']
       kv_sep: '='
-      item_sep: '_'
+      item_sep: '__'
