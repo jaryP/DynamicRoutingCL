@@ -1,8 +1,8 @@
 #method:
 _target_: methods.ContinuosRouting
 mem_size: 200
-past_task_reg: 0.001
-past_margin: 0.2
+past_task_reg: 0.01
+past_margin: 2
 warm_up_epochs: -1
 future_task_reg: 1
 future_margin: 5

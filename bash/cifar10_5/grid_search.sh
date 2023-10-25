@@ -28,6 +28,28 @@ oewc)
     python main.py +scenario=cil_cifar10_5tasks +model="$MODEL" +training=cifar10_5 +method=oewc_default optimizer=adam  device="$DEVICE" method.ewc_lambda=$lambda experiment=dev hydra=search
   done
 ;;
+#routing)
+##  routing_3l_convblock
+##  routing_3l_convblock_invusage
+#  for memory in 200 500 1000 2000
+#  do
+#    for past_margin in 0.1 0.2 0.3 0.5
+#    do
+#      for past_margin_w in 1 0.5 0.1 0.01 0.001
+#      do
+##        for future_margin in 1 2 3 4 5
+#        for future_margin in 3
+#        do
+##            for gamma in 1 0.5 0.1
+#            for gamma in 1 0.5 0.1 0.0
+#            do
+#              python main.py +scenario=cil_cifar10_5tasks +model=$MODEL +training=cifar10_5 +method=routing_cifar10 optimizer=adam device=$DEVICE experiment=dev method.mem_size=$memory method.past_margin=$past_margin  method.future_margin=$future_margin method.past_task_reg=$past_margin_w method.future_task_reg=0.5 method.gamma=$gamma hydra=search
+#            done
+#          done
+#        done
+#      done
+#    done
+#;;
 routing)
 #  routing_3l_convblock
 #  routing_3l_convblock_invusage
@@ -37,43 +59,28 @@ routing)
     do
       for past_margin_w in 1 0.5 0.1 0.01 0.001
       do
-#        for future_margin in 1 2 3 4 5
-        for future_margin in 3
+        for future_margin in 5
         do
-#            for gamma in 1 0.5 0.1
-            for gamma in 1 0.5 0.1 0.0
+            for gamma in 1
             do
-              python main.py +scenario=cil_cifar10_5tasks +model=$MODEL +training=cifar10_5 +method=routing_cifar10 optimizer=adam device=$DEVICE experiment=dev method.mem_size=$memory method.past_margin=$past_margin  method.future_margin=$future_margin method.past_task_reg=$past_margin_w method.future_task_reg=0.5 method.gamma=$gamma hydra=search
+                for pa in random usage inverse_usage
+                do
+                for pt in task class
+                do
+              python main.py +scenario=cil_cifar10_5tasks +model=$MODEL +training=cifar10_5 +method=routing_cifar10 optimizer=adam device=$DEVICE experiment=dev method.mem_size=$memory method.past_margin=$past_margin  method.future_margin=$future_margin method.past_task_reg=$past_margin_w method.future_task_reg=0.5 method.gamma=$gamma hydra=search model.path_selection_strategy=$pa model.prediction_mode=$p wandb_prefix=routing_model_search_
+            done
+            done
             done
           done
         done
       done
     done
 ;;
-
-#oewc)
-#  python main.py +scenario=cil_cifar10_5tasks +model=resnet20 +training=cifar10_5 +method=oewc_100 optimizer=sgd  training.device="$DEVICE" hydra.run.dir='./results/ci_cifar10/resnet20/oewc/oewc_100'
-#;;
-#cml)
-#  python main.py +scenario=cil_cifar10_5tasks +model=resnet20 +training=cifar10_5 +method=cml_01 optimizer=sgd  training.device="$DEVICE" hydra.run.dir='./results/ci_cifar10/resnet20/cml/cml_01'
-#;;
-#naive)
-#  python main.py +scenario=cil_cifar10_5tasks +model=resnet20 +training=cifar10_5  +method=naive optimizer=sgd  training.device="$DEVICE" hydra.run.dir='./results/ci_cifar10/resnet20/naive/'
-#;;
-#cumulative)
-#  python main.py +scenario=cil_cifar10_5tasks +model=resnet20 +training=cifar10_5 +method=cumulative optimizer=sgd  training.device="$DEVICE" hydra.run.dir='./results/ci_cifar10/resnet20/cumulative/'
-#;;
 #icarl)
 #  python main.py +scenario=cil_cifar10_5tasks +model=resnet20 +training=cifar10_5 +method=icarl_2000 optimizer=sgd  training.device="$DEVICE" hydra.run.dir='./results/ci_cifar10/resnet20/icarl/icarl_2000/'
 #;;
 #replay)
 #  python main.py +scenario=cil_cifar10_5tasks +model=resnet20 +training=cifar10_5 +method=replay_500 optimizer=sgd  training.device="$DEVICE" hydra.run.dir='./results/ci_cifar10/resnet20/replay/replay_500'
-#;;
-#ssil)
-#python main.py +scenario=cil_cifar10_5tasks +model="$MODEL" +training=cifar10_5 +method=ssil_200 optimizer=adam  device="$DEVICE"
-#python main.py +scenario=cil_cifar10_5tasks +model="$MODEL" +training=cifar10_5 +method=ssil_500 optimizer=adam  device="$DEVICE"
-#python main.py +scenario=cil_cifar10_5tasks +model="$MODEL" +training=cifar10_5 +method=ssil_1000 optimizer=adam  device="$DEVICE"
-#python main.py +scenario=cil_cifar10_5tasks +model="$MODEL" +training=cifar10_5 +method=ssil_2000 optimizer=adam  device="$DEVICE"
 #;;
 #cope)
 #  python main.py +scenario=cil_cifar10_5tasks +model=resnet20 +training=cifar10_5 +method=cope optimizer=sgd  training.device="$DEVICE" hydra.run.dir='./results/ci_cifar10/resnet20/cope/cope_500'

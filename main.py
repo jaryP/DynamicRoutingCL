@@ -253,6 +253,13 @@ def avalanche_training(cfg: DictConfig):
             if os.path.exists(train_results_path):
                 with open(train_results_path) as json_file:
                     train_res = json.load(json_file)
+
+            if os.path.exists(results_path):
+                with open(results_path, 'r') as json_file:
+                    last_results = json.load(json_file)
+
+                    log.info(last_results)
+
             else:
                 train_res = results_after_each_task
         else:
@@ -290,10 +297,15 @@ def avalanche_training(cfg: DictConfig):
 
             metrics = hydra.utils.instantiate(cfg.evaluation.metrics)
 
-            loggers = hydra.utils.instantiate(cfg.evaluation.loggers,
-                                              project_name=cfg.core.project_name,
-                                              run_name=wandb_name,
-                                              params={'config': wandb_dict})
+            loggers = []
+            for ev in cfg.evaluation.loggers:
+                if 'WandBLogger' in ev['_target_']:
+                    v = WandBLogger(project_name=cfg.core.project_name,
+                                    run_name=wandb_name,
+                                    params={'config': wandb_dict})
+                else:
+                    v = hydra.utils.instantiate(ev)
+                loggers.append(v)
 
             eval_plugin = EvaluationPlugin(
                 metrics,

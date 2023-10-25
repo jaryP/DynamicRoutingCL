@@ -8,6 +8,6 @@ job:
   chdir: True
   config:
     override_dirname:
-      exclude_keys: ['device', 'training', 'experiment']
+      exclude_keys: ['device', 'training', 'experiment', 'wandb_prefix']
       kv_sep: '='
       item_sep: '_'

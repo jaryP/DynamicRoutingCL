@@ -33,6 +33,8 @@ class ContinuosRouting(SupervisedTemplate):
                  eval_every=-1,
                  ):
 
+        assert isinstance(model, RoutingModel), f'When using {self.__class__.__name__} the model must be a ContinuosRouting one'
+
         self.tasks_nclasses = dict()
         self.current_mb_size = 0
 
