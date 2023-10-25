@@ -223,7 +223,7 @@ def avalanche_training(cfg: DictConfig):
         complete_results_path = os.path.join(experiment_path,
                                              'complete_results.json')
         complete_results_dev_path = os.path.join(experiment_path,
-                                             'complete_results_dev.json')
+                                                 'complete_results_dev.json')
 
         train_results_path = os.path.join(experiment_path, 'train_results.json')
 
@@ -288,24 +288,16 @@ def avalanche_training(cfg: DictConfig):
             wandb_dict = OmegaConf.to_container(cfg, resolve=True)
             wandb_dict['saving_path'] = experiment_path
 
+            metrics = hydra.utils.instantiate(cfg.evaluation.metrics)
+
+            loggers = hydra.utils.instantiate(cfg.evaluation.loggers,
+                                              project_name=cfg.core.project_name,
+                                              run_name=wandb_name,
+                                              params={'config': wandb_dict})
+
             eval_plugin = EvaluationPlugin(
-                # StreamAccuracy(),
-                # TrainedExperienceAccuracy(),
-                accuracy_metrics(stream=True,
-                                 trained_experience=True,
-                                 experience=True),
-                bwt_metrics(experience=True, stream=True),
-                # MAC_metrics(minibatch=True, epoch=True, experience=True),
-                # forgetting_metrics(experience=True, stream=True),
-                # ExperienceTrainableParameters(),
-                StreamTrainableParameters(),
-                # timing_metrics(minibatch=True, epoch=True, experience=False),
-                # loggers=[TextLogger()] if console_log else [],
-                loggers=[TextLogger(),
-                         WandBLogger(project_name=cfg.core.project_name,
-                                     run_name=wandb_name,
-                                     params={'config': wandb_dict})
-                         ],
+                metrics,
+                loggers=loggers,
                 strict_checks=False
             )
 
@@ -408,10 +400,10 @@ def avalanche_training(cfg: DictConfig):
                     all_results = strategy.evaluator.get_all_metrics()
 
                     if eval_every < 0:
-                        all_results_dev = strategy.eval(tasks.test_stream[:i + 1],
-                                                        pin_memory=pin_memory,
-                                                        num_workers=num_workers)
-
+                        all_results_dev = strategy.eval(
+                            tasks.test_stream[:i + 1],
+                            pin_memory=pin_memory,
+                            num_workers=num_workers)
 
                     log.info(res)
 

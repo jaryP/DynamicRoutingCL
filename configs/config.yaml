@@ -9,6 +9,7 @@ defaults:
   - hydra: base
   - optimizer: sgd
   - experiment: base
+  - evaluation: default
   - override hydra/job_logging: console
   - _self_
 
