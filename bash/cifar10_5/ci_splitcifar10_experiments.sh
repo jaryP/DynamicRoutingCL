@@ -36,10 +36,10 @@ replay)
   python main.py +scenario=class_incremental_cifar10 +model="$MODEL" +training=cifar10 +method=replay_2000 optimizer=sgd  device="$DEVICE"
 ;;
 ssil)
-  python main.py +scenario=class_incremental_cifar10 +model="$MODEL" +training=cifar10 +method=ssil_200 optimizer=adam  device="$DEVICE"
-  python main.py +scenario=class_incremental_cifar10 +model="$MODEL" +training=cifar10 +method=ssil_500 optimizer=adam  device="$DEVICE"
-  python main.py +scenario=class_incremental_cifar10 +model="$MODEL" +training=cifar10 +method=ssil_1000 optimizer=adam  device="$DEVICE"
-  python main.py +scenario=class_incremental_cifar10 +model="$MODEL" +training=cifar10 +method=ssil_2000 optimizer=adam  device="$DEVICE"
+  python main.py +scenario=class_incremental_cifar10 +model="$MODEL" +training=cifar10 +method=ssil_200 optimizer=adam  device="$DEVICE" training.epochs=100
+  python main.py +scenario=class_incremental_cifar10 +model="$MODEL" +training=cifar10 +method=ssil_500 optimizer=adam  device="$DEVICE" training.epochs=100
+  python main.py +scenario=class_incremental_cifar10 +model="$MODEL" +training=cifar10 +method=ssil_1000 optimizer=adam  device="$DEVICE" training.epochs=100
+  python main.py +scenario=class_incremental_cifar10 +model="$MODEL" +training=cifar10 +method=ssil_2000 optimizer=adam  device="$DEVICE" training.epochs=100
 ;;
 #cope)
 #  python main.py +scenario=class_incremental_cifar10 +model="$MODEL" +training=cifar10 +method=cope optimizer=adam  device="$DEVICE" hydra.run.dir='./results/ci_cifar10/"$MODEL"/cope/cope_500'
