@@ -55,7 +55,7 @@ routing)
 #  routing_3l_convblock_invusage
   for memory in 200 500 1000 2000
   do
-    for past_margin in 1 2 3 0.3 0.2
+    for past_margin in 1 0.3 0.2
      do
       for past_margin_w in 0.5 0.1 0.01
       do
@@ -65,7 +65,7 @@ routing)
             do
                 for pa in random usage inverse_usage
                 do
-                for pt in task class
+                for pt in task
                 do
               python main.py +scenario=cil_cifar10_5tasks +model=$MODEL +training=cifar10_5 +method=routing_cifar10 optimizer=adam device=$DEVICE experiment=dev method.mem_size=$memory method.past_margin=$past_margin  method.future_margin=$future_margin method.past_task_reg=$past_margin_w method.future_task_reg=1 method.gamma=$gamma hydra=search model.path_selection_strategy=$pa model.prediction_mode=$pt wandb_prefix=routing_model_search_
             done
