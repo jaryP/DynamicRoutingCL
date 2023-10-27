@@ -8,7 +8,7 @@ do
   do
     for pt in task class
     do
-      python main.py +scenario=cil_cifar10_5tasks +model=routing_5l_convblock_p model.path_selection_strategy=$pa model.prediction_mode=$pt +training=cifar10_5 +method=routing_cifar10 optimizer=adam device=$DEVICE experiment=dev method.mem_size=$memory hydra=search wandb_prefix=routing_model_search_
+      python main.py +scenario=cil_cifar10_5 +model=routing_5l_convblock_p model.path_selection_strategy=$pa model.prediction_mode=$pt +training=cifar10_5 +method=routing_cifar10 optimizer=adam device=$DEVICE experiment=dev method.mem_size=$memory hydra=search wandb_prefix=routing_model_search_
     done
   done
 done
