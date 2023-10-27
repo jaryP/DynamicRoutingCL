@@ -6,6 +6,7 @@ import numpy as np
 import torch
 from avalanche.models import MultiTaskModule
 from torch import nn, Tensor
+from torch.nn.modules.batchnorm import _NormBase
 from torch.utils.data import DataLoader
 
 from models.routing.layers import BlockRoutingLayer
@@ -15,33 +16,43 @@ class FactoryWrapper(nn.Module):
     def __init__(self, module: nn.Module, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        parameters = len(list(module.parameters()))
+        self._reset_parameters = len(list(module.parameters())) > 0
+        self.to_route = self._reset_parameters and not isinstance(module, _NormBase)
+
+        # self._reset_stats = len(list(module.parameters())) > 0
+
         self.module = module
 
-        if parameters == 0:
-            self._mode = self._no_parameters
-            self.is_trainable = False
-        else:
-            self._mode = self._with_parameters
-            self.is_trainable = True
-
-    def _no_parameters(self):
-        return deepcopy(self.module)
-
-    def _with_parameters(self):
-        module = deepcopy(self.module)
-        for m in module.modules():
-            if hasattr(m, 'reset_parameters'):
-                m.reset_parameters()
-        return module
+    #     if parameters == 0 and not isinstance(module, _NormBase):
+    #         self._mode = self._no_parameters
+    #         self.to_route = False
+    #     else:
+    #         self._mode = self._with_parameters
+    #         self.to_route = True
+    #
+    # def _no_parameters(self):
+    #     return deepcopy(self.module)
+    #
+    # def _with_parameters(self):
+    #     module = deepcopy(self.module)
+    #     for m in module.modules():
+    #         if hasattr(m, 'reset_parameters'):
+    #             m.reset_parameters()
+    #     return module
 
     def __call__(self, *args, **kwargs):
-        module = self._mode()
-        for m in module.children():
+        new_module = deepcopy(self.module)
+
+        if self._reset_parameters:
+            for m in new_module.modules():
+                if hasattr(m, 'reset_parameters'):
+                    m.reset_parameters()
+
+        for m in new_module.children():
             if hasattr(m, 'reset_running_stats'):
                 m.reset_running_stats()
 
-        return module
+        return new_module
 
 
 class RoutingModel(MultiTaskModule):
@@ -97,7 +108,7 @@ class RoutingModel(MultiTaskModule):
         self.pre_process = pre_process_module
 
         blocks_f = [FactoryWrapper(m) for m in layers]
-        trainable_blocks = len([f for f in blocks_f if f.is_trainable])
+        trainable_blocks = len([f for f in blocks_f if f.to_route])
 
         if not isinstance(layers_block_n, Sequence):
             layers_block_n = [layers_block_n] * trainable_blocks
@@ -107,13 +118,13 @@ class RoutingModel(MultiTaskModule):
 
         blocks_it = iter(layers_block_n)
 
-        for factory in blocks_f:
-            if factory.is_trainable:
+        for block_factory in blocks_f:
+            if block_factory.to_route:
                 n_blocks = next(blocks_it)
-                self.layers.append(BlockRoutingLayer(factory=factory,
+                self.layers.append(BlockRoutingLayer(factory=block_factory,
                                                      n_blocks=n_blocks))
             else:
-                self.layers.append(factory())
+                self.layers.append(block_factory())
 
         self.classifiers = nn.ParameterDict()
 

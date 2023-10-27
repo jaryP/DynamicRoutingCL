@@ -1,2 +1,2 @@
-_target_: methods.strategies.SeparatedSoftmaxIncrementalLearning
+_target_: methods.ssil.SeparatedSoftmax
 mem_size: 200

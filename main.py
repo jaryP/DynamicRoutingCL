@@ -208,7 +208,8 @@ def avalanche_training(cfg: DictConfig):
                 if 'WandBLogger' in ev['_target_']:
                     v = WandBLogger(project_name=cfg.core.project_name,
                                     run_name=wandb_name,
-                                    params={'config': wandb_dict})
+                                    params={'config': wandb_dict,
+                                            'reinit': True})
                 else:
                     v = hydra.utils.instantiate(ev)
                 loggers.append(v)

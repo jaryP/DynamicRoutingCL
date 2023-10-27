@@ -3,10 +3,10 @@ from avalanche.training import DER, Replay, GEM, Cumulative, Naive, \
 
 from .routing import ContinuosRouting
 
-from methods.strategies import SeparatedSoftmaxIncrementalLearning
+from .ssil import SeparatedSoftmax
 
 # AVAILABLE_METHODS = {
-#     'ssil': SeparatedSoftmaxIncrementalLearning,
+#     'ssil': SeparatedSoftmax,
 #     'der': DER,
 #     'replay': Replay,
 #     'gem': GEM,
