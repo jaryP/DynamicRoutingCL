@@ -18,6 +18,7 @@ class ContinuosRouting(SupervisedTemplate):
                  mem_size: int,
                  train_mb_size: int = 1,
                  train_epochs: int = 1,
+                 alpha: float = 1,
                  past_task_reg=1,
                  past_margin=0.2,
                  warm_up_epochs=-1,
@@ -45,7 +46,7 @@ class ContinuosRouting(SupervisedTemplate):
         self.double_sampling = False
 
         # Past task loss weight
-        self.alpha = 1
+        self.alpha = alpha
 
         self.past_task_reg = past_task_reg
         self.past_margin = past_margin

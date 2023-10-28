@@ -112,6 +112,14 @@ def avalanche_training(cfg: DictConfig):
     force_sit = False
 
     head_classes = cfg.model.get('head_classes', None)
+    if plugin_name == 'der':
+        assert head_classes is None, (
+            'Whn using DER you must specify '
+            'the head dimension of the model, '
+            'by setting head_classes parameter'
+            'in the config file.')
+
+        del cfg.model.head_classes
 
     experiments_results = []
 
@@ -173,16 +181,6 @@ def avalanche_training(cfg: DictConfig):
 
             img, _, _ = tasks.train_stream[0].dataset[0]
 
-            if plugin_name == 'der':
-                assert 'head_classes' in model_cfg, (
-                    'Whn using DER you must specify '
-                    'the head dimension of the model, '
-                    'by setting head_classes parameter'
-                    'in the config file.')
-
-            if head_classes is not None:
-                del cfg.model.head_classes
-
             backbone = hydra.utils.instantiate(cfg.model)
 
             model = get_cl_model(backbone=backbone,
@@ -193,24 +191,26 @@ def avalanche_training(cfg: DictConfig):
                                  is_class_incremental_learning=is_cil,
                                  **model_cfg)
 
-            wandb_prefix = cfg.get('wandb_prefix', '')
-
-            wandb_name = f'{cfg.scenario.dataset}/{cfg.scenario.n_tasks}_{cfg.trainer_name}_{backbone.__class__.__name__}_{exp_n}'
-            if wandb_prefix is not None and wandb_prefix != '':
-                wandb_name = wandb_prefix + wandb_name
-
-            wandb_dict = OmegaConf.to_container(cfg, resolve=True)
-            wandb_dict['saving_path'] = experiment_path
-
             metrics = hydra.utils.instantiate(cfg.evaluation.metrics)
 
             loggers = []
             for ev in cfg.evaluation.loggers:
                 if 'WandBLogger' in ev['_target_']:
+                    wandb_group = cfg.get('wandb_group', None)
+                    wandb_prefix = cfg.get('wandb_prefix', '')
+
+                    wandb_name = f'{cfg.scenario.dataset}/{cfg.scenario.n_tasks}_{cfg.trainer_name}_{backbone.__class__.__name__}_{exp_n}'
+                    if wandb_prefix is not None and wandb_prefix != '':
+                        wandb_name = wandb_prefix + wandb_name
+
+                    wandb_dict = OmegaConf.to_container(cfg, resolve=True)
+                    wandb_dict['saving_path'] = experiment_path
+
                     v = WandBLogger(project_name=cfg.core.project_name,
                                     run_name=wandb_name,
                                     params={'config': wandb_dict,
-                                            'reinit': True})
+                                            'reinit': True,
+                                            'group': wandb_group})
                 else:
                     v = hydra.utils.instantiate(ev)
                 loggers.append(v)
