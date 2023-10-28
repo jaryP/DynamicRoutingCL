@@ -30,7 +30,7 @@ layers:
   - _target_: torch.nn.Flatten
     start_dim: 1
 backbone_output_dim: 128
-layers_block_n: 5
+layers_block_n: [2, 3, 5]
 future_paths_to_sample: 5
-path_selection_strategy: 'usage'
+path_selection_strategy: 'random'
 prediction_mode: 'task'

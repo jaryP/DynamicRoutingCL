@@ -1,0 +1,5 @@
+_target_: avalanche.training.DER
+beta: 1
+alpha: 1
+mem_size: 500
+

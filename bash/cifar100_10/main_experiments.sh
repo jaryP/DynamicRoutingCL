@@ -48,10 +48,10 @@ er_ece)
   python main.py +scenario=cil_cifar100_10 +model="$MODEL" +training=cifar10_5 +method=er_ece_default method.mem_size=2000 optimizer=adam  device="$DEVICE"
 ;;
 gdumb)
-  python main.py +scenario=cil_cifar100_10 +model="$MODEL" +training=cifar10_5 +method=er_ece_default method.mem_size=200 optimizer=adam  device="$DEVICE"
-  python main.py +scenario=cil_cifar100_10 +model="$MODEL" +training=cifar10_5 +method=er_ece_default method.mem_size=500 optimizer=adam  device="$DEVICE"
-  python main.py +scenario=cil_cifar100_10 +model="$MODEL" +training=cifar10_5 +method=er_ece_default method.mem_size=1000 optimizer=adam  device="$DEVICE"
-  python main.py +scenario=cil_cifar100_10 +model="$MODEL" +training=cifar10_5 +method=er_ece_default method.mem_size=2000 optimizer=adam  device="$DEVICE"
+  python main.py +scenario=cil_cifar100_10 +model="$MODEL" +training=cifar10_5 +method=gdumb method.mem_size=200 optimizer=adam  device="$DEVICE"
+  python main.py +scenario=cil_cifar100_10 +model="$MODEL" +training=cifar10_5 +method=gdumb method.mem_size=500 optimizer=adam  device="$DEVICE"
+  python main.py +scenario=cil_cifar100_10 +model="$MODEL" +training=cifar10_5 +method=gdumb method.mem_size=1000 optimizer=adam  device="$DEVICE"
+  python main.py +scenario=cil_cifar100_10 +model="$MODEL" +training=cifar10_5 +method=gdumb method.mem_size=2000 optimizer=adam  device="$DEVICE"
 ;;
 #cope)
 #  python main.py +scenario=cil_cifar100_10 +model="$MODEL" +training=cifar10_5 +method=cope optimizer=adam  device="$DEVICE" hydra.run.dir='./results/ci_cifar10/"$MODEL"/cope/cope_500'

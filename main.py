@@ -3,6 +3,7 @@ import logging
 import os
 import random
 import warnings
+from collections import defaultdict
 
 import hydra
 import numpy as np
@@ -112,6 +113,8 @@ def avalanche_training(cfg: DictConfig):
 
     head_classes = cfg.model.get('head_classes', None)
 
+    experiments_results = []
+
     for exp_n in range(1, n_experiments + 1):
         log.info(f'Starting experiment {exp_n} (of {n_experiments})')
 
@@ -163,9 +166,7 @@ def avalanche_training(cfg: DictConfig):
             if os.path.exists(results_path):
                 with open(results_path, 'r') as json_file:
                     last_results = json.load(json_file)
-
-                    log.info(last_results)
-
+                    experiments_results.append(last_results)
             else:
                 train_res = results_after_each_task
         else:
@@ -254,21 +255,6 @@ def avalanche_training(cfg: DictConfig):
                     'When using DER strategy, '
                     'parameter model.head_classes must be specified.')
 
-            # trainer = get_trainer(**method,
-            #                       tasks=tasks,
-            #                       sit=is_cil,
-            #                       cfg=cfg)
-            #
-            # strategy = trainer(model=model,
-            #                    criterion=criterion,
-            #                    optimizer=opt,
-            #                    train_epochs=epochs
-            #                    if method['name'].lower() != 'cope' else 1,
-            #                    train_mb_size=batch_size,
-            #                    eval_every=eval_every,
-            #                    evaluator=eval_plugin,
-            #                    device=device)
-
             results_after_each_task = []
             all_results = {}
             all_results_dev = {}
@@ -351,6 +337,8 @@ def avalanche_training(cfg: DictConfig):
             with open(complete_results_dev_path, 'w') as f:
                 json.dump(all_results_dev, f, ensure_ascii=False, indent=4)
 
+            experiments_results.append(results_after_each_task)
+
         for res in results_after_each_task:
             average_accuracy = []
             for k, v in res.items():
@@ -371,22 +359,20 @@ def avalanche_training(cfg: DictConfig):
         #
         # all_results.append(results_after_each_task)
 
-    # log.info(f'Average across the experiments.')
-    #
-    # mean_res = defaultdict(list)
-    #
-    # for i, r in enumerate(all_results):
-    #
-    #     for k, v in r[-1].items():
-    #         mean_res[k].append(v)
-    #
-    # m = {k: np.mean(v) for k, v in mean_res.items()}
-    # s = {k: np.std(v) for k, v in mean_res.items()}
-    #
-    # for k, v in results_after_each_task[-1].items():
-    #     _m = m[k]
-    #     _s = s[k]
-    #     log.info(f'Metric {k}: mean: {_m:.2f}, std: {_s:.2f}')
+    mean_res = defaultdict(list)
+
+    for i, r in enumerate(experiments_results):
+        for k, v in r[-1].items():
+            mean_res[k].append(v)
+
+    averaged_results = {k: {'mean': np.mean(v),
+                            'std': np.std(v)} for k, v in mean_res.items()}
+
+    for k, d in averaged_results.items():
+        log.info(f'Metric {k}: mean: {d["mean"]:.2f}, std: {d["std"]:.2f}')
+
+    with open(os.path.join(base_path, 'averaged_results.json'), 'w') as f:
+        json.dump(averaged_results, f, ensure_ascii=False, indent=4)
 
 
 if __name__ == "__main__":
