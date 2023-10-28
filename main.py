@@ -113,8 +113,8 @@ def avalanche_training(cfg: DictConfig):
 
     head_classes = cfg.model.get('head_classes', None)
     if plugin_name == 'der':
-        assert head_classes is None, (
-            'Whn using DER you must specify '
+        assert head_classes is not None, (
+            'When using DER you must specify '
             'the head dimension of the model, '
             'by setting head_classes parameter'
             'in the config file.')
