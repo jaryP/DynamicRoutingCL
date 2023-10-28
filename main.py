@@ -36,8 +36,6 @@ def avalanche_training(cfg: DictConfig):
     log.info(OmegaConf.to_yaml(cfg))
     log.info(os.getcwd())
 
-    # check config
-
     device = cfg.get('device', 'cpu')
 
     scenario = cfg['scenario']
@@ -69,7 +67,6 @@ def avalanche_training(cfg: DictConfig):
     eval_every = experiment.get('eval_every', 5)
 
     save_states = experiment.get('save_states', False)
-    console_log = experiment.get('console_log', False)
 
     if device == 'cpu':
         warnings.warn("Device set to cpu.")
@@ -82,27 +79,8 @@ def avalanche_training(cfg: DictConfig):
 
     device = torch.device(device)
 
-    all_results = []
-
     base_path = os.getcwd()
     cfg_path = os.path.join(os.getcwd(), '.hydra', 'config.yaml')
-
-    # if os.path.exists(cfg_path):
-    #     with open(cfg_path, 'r') as f:
-    #         past_cfg = yaml.safe_load(f)
-    #
-    #         keys_set = set([k for k in past_cfg.keys() if k != 'device'])
-    #         b = keys_set == set([k for k in cfg.keys() if k != 'device'])
-    #
-    #         assert b, (
-    #             f'You are launching an experiment having output path {os.getcwd()}, '
-    #             f'but the experiment config and the one saved in the folder have not the same keys.')
-    #
-    #         b = all([past_cfg[k] == cfg[k] for k in keys_set])
-    #
-    #         assert b, (
-    #             f'You are launching an experiment having output path {os.getcwd()}, '
-    #             f'but the experiment config and the one saved in the folder not equal: {past_cfg - cfg}')
 
     is_cil = not task_incremental_learning
     task_incremental_learning = task_incremental_learning if plugin_name != 'cml' \
