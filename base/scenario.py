@@ -1,3 +1,4 @@
+from functools import lru_cache
 from typing import Optional
 
 import numpy as np
@@ -16,6 +17,32 @@ from avalanche.benchmarks.classic.ctiny_imagenet import \
     _default_eval_transform as _default_tiny_imagenet_eval_transform
 from avalanche.benchmarks.datasets.external_datasets import get_cifar10_dataset, \
     get_cifar100_dataset
+
+
+def get_permutation(n_classe):
+    @lru_cache(maxsize=None)
+    def rule_asc(n):
+        a = [0 for i in range(n + 1)]
+        k = 1
+        a[1] = n
+        while k != 0:
+            x = a[k - 1] + 1
+            y = a[k] - 1
+            k -= 1
+            while x <= y:
+                a[k] = x
+                y -= x
+                k += 1
+            a[k] = x + y
+            yield a[:k + 1]
+
+    divisions = list(filter(lambda x: not 1 in x and len(x) > 1,
+                            rule_asc(n_classe)))
+
+    selected = divisions[np.random.randint(0, len((divisions)))]
+    np.random.shuffle(selected)
+
+    return {i: v for i, v in enumerate(selected)}
 
 
 def get_dataset_by_name(name: str, root: str = None):
@@ -41,7 +68,8 @@ def get_dataset_by_name(name: str, root: str = None):
 
 def get_dataset_nc_scenario(name: str, n_tasks: int, til: bool,
                             shuffle: bool = True, seed: Optional[int] = None,
-                            force_sit=False, method_name=None, dev_split=None):
+                            force_sit=False, method_name=None, dev_split=None,
+                            permuted_dataset: bool = False):
 
     name = name.lower()
 
@@ -51,6 +79,12 @@ def get_dataset_nc_scenario(name: str, n_tasks: int, til: bool,
         assert False, f'Dataset {name} not found.'
 
     train_split, test_split, train_t, test_t = r
+
+    if permuted_dataset:
+        rp = get_permutation(len(set(train_split.targets)))
+        n_tasks = len(rp)
+    else:
+        rp = None
 
     if dev_split is not None:
         idx = np.arange(len(train_split))
@@ -75,6 +109,7 @@ def get_dataset_nc_scenario(name: str, n_tasks: int, til: bool,
             task_labels=True,
             seed=seed,
             fixed_class_order=None,
+            per_exp_classes=rp,
             shuffle=shuffle,
             class_ids_from_zero_in_each_exp=False,
             class_ids_from_zero_from_first_exp=True,
@@ -89,6 +124,7 @@ def get_dataset_nc_scenario(name: str, n_tasks: int, til: bool,
             task_labels=True,
             seed=seed,
             fixed_class_order=None,
+            per_exp_classes=rp,
             shuffle=shuffle,
             class_ids_from_zero_in_each_exp=True,
             train_transform=train_t,
@@ -102,6 +138,7 @@ def get_dataset_nc_scenario(name: str, n_tasks: int, til: bool,
             seed=seed,
             class_ids_from_zero_from_first_exp=True,
             fixed_class_order=None,
+            per_exp_classes=rp,
             shuffle=shuffle,
             train_transform=train_t,
             eval_transform=test_t)

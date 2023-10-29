@@ -48,17 +48,11 @@ class BlockRoutingLayer(DynamicModule):
                     p.requires_grad_(flag)
 
     def freeze_blocks(self):
-        for p in self.blocks.parameters():
-            p.requires_grad_(False)
-
-        for p in self.projectors.parameters():
-            p.requires_grad_(False)
+        for b in self.blocks.keys():
+            self.freeze_block(b)
 
     def activate_block(self, block_ids):
-        block_id = str(block_ids)
-
-        for p in self.blocks[block_id].parameters():
-            p.requires_grad_(True)
+        self.freeze_block(block_ids, False)
 
     def freeze_block(self, block_ids, freeze=True):
         block_id = str(block_ids)
@@ -70,6 +64,10 @@ class BlockRoutingLayer(DynamicModule):
         if block_id in self.projectors:
             for p in self.projectors[block_id].parameters():
                 p.requires_grad_(freeze)
+
+        for m in self.blocks[block_id].modules():
+            if hasattr(m, 'track_running_stats'):
+                m.track_running_stats = freeze
 
     def forward(self, x, block_id, **kwargs):
         if not isinstance(block_id, (list, tuple)):

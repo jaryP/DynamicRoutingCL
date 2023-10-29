@@ -8,7 +8,7 @@ from torch import nn
 import torch.nn.functional as F
 
 # from main_random_paths_random_centroids import RoutingModel
-from models import resnet20, resnet32, custom_vgg, RoutingModel
+from models import resnet20, resnet32, custom_vgg, RoutingModel, CondensedRoutingModel
 from models.utils import AvalanceCombinedModel, CustomMultiHeadClassifier, \
     PytorchCombinedModel
 
@@ -105,7 +105,7 @@ def get_cl_model(
                  masking=False,
                  **kwargs):
 
-    if isinstance(backbone, RoutingModel):
+    if isinstance(backbone, (RoutingModel, CondensedRoutingModel)):
         return backbone
 
     if method_name in ['cope', 'mcml']:

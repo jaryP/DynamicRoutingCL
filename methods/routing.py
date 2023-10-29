@@ -6,10 +6,11 @@ from avalanche.training.plugins import EvaluationPlugin
 from avalanche.training.plugins.evaluation import default_evaluator
 from avalanche.training.templates import SupervisedTemplate
 from torch import nn
-from torch.optim import Optimizer
+from torch.optim import Optimizer, SGD
 from torch.utils.data import DataLoader
 
 from models import RoutingModel
+from models.routing.model import CondensedRoutingModel
 
 
 class ContinuosRouting(SupervisedTemplate):
@@ -35,8 +36,8 @@ class ContinuosRouting(SupervisedTemplate):
                  ):
 
         assert isinstance(model,
-                          RoutingModel), f'When using {self.__class__.__name__} the model must be a ContinuosRouting one'
-
+                          (RoutingModel, CondensedRoutingModel)), f'When using {self.__class__.__name__} the model must be a ContinuosRouting one'
+        
         self.tasks_nclasses = dict()
         self.current_mb_size = 0
 
@@ -101,6 +102,48 @@ class ContinuosRouting(SupervisedTemplate):
         self._after_training_exp_f(**kwargs)
 
         super()._after_training_exp(**kwargs)
+
+        classes_so_far = len(self.experience.classes_seen_so_far)
+
+        if not isinstance(self.model, CondensedRoutingModel):
+            return
+
+        if classes_so_far > len(self.experience.classes_in_this_experience):
+            dataset = torch.utils.data.ConcatDataset(self.past_dataset.values())
+
+            past_model = deepcopy(self.model).eval()
+
+            new_head = nn.Linear(self.model.backbone_output_dim,
+                                              classes_so_far).to(self.device)
+            self.model.condensed_model[-1] = new_head
+
+            assigned_paths = self.model.assigned_paths
+
+            optimizer = SGD(self.model.condensed_model.parameters(), lr=0.01)
+
+            datalaoder = DataLoader(dataset, len(dataset) // 20, shuffle=True)
+            self.model.train()
+
+            for _ in range(100):
+                losses = []
+                for x, y, _ in datalaoder:
+                    x, y = x.to(self.device), y.to(self.device)
+
+                    with torch.no_grad():
+                        past_logits = past_model(x)[0]
+
+                    current_logits = self.model.condensed_model(x)
+
+                    loss = nn.functional.mse_loss(current_logits, past_logits)
+
+                    optimizer.zero_grad()
+                    loss.backward()
+                    optimizer.step()
+
+                    losses.append(loss.item())
+
+            self.model.reallocate_paths(assigned_paths)
+            self.model.use_condensed_model = True
 
     def sample_past_batch(self, batch_size):
         if len(self.past_dataset) == 0:
@@ -310,11 +353,11 @@ class ContinuosRouting(SupervisedTemplate):
 
         if len(self.past_dataset) == 0:
             if isinstance(self.model, RoutingModel):
-                loss_val = nn.functional.cross_entropy(pred, self.mb_y,
+                loss = nn.functional.cross_entropy(pred, self.mb_y,
                                                        label_smoothing=0)
             else:
                 log_p_y = torch.log_softmax(pred, dim=1)
-                loss_val = -log_p_y.gather(1, self.mb_y.unsqueeze(-1)).squeeze(
+                loss = -log_p_y.gather(1, self.mb_y.unsqueeze(-1)).squeeze(
                     -1).mean()
         else:
             s = self.current_mb_size
@@ -358,111 +401,111 @@ class ContinuosRouting(SupervisedTemplate):
 
             loss_val = loss1 + self.alpha * loss2
 
-        if self.future_task_reg > 0 and self.future_margin > 0:
-            future_logits = self.mb_future_logits
-            future_mx = future_logits.max(-1).values
-            current_mx = self.mb_output.max(-1).values
+            if self.future_task_reg > 0 and self.future_margin > 0:
+                future_logits = self.mb_future_logits
+                future_mx = future_logits.max(-1).values
+                current_mx = self.mb_output.max(-1).values
 
-            reg = current_mx - future_mx - self.future_margin
-            reg = torch.maximum(torch.zeros_like(reg), reg)
-            future_reg = reg.mean() * self.future_task_reg
+                reg = current_mx - future_mx - self.future_margin
+                reg = torch.maximum(torch.zeros_like(reg), reg)
+                future_reg = reg.mean() * self.future_task_reg
 
-        loss = loss_val + past_reg + future_reg
+            loss = loss_val + past_reg + future_reg
 
-        if self.is_training and any([self.gamma > 0, self.delta > 0]):
-            if self.past_model is not None:
-                bs = len(self.mb_output) // 2
+            if self.is_training and any([self.gamma > 0, self.delta > 0]):
+                if self.past_model is not None:
+                    bs = len(self.mb_output) // 2
 
-                if self.double_sampling:
-                    x, y, _ = self.sample_past_batch(bs)
-                    x, y = x.to(self.device), y.to(self.device)
-                    curr_logits, curr_features = self.model(x)[:2]
-                else:
-                    x, y = (self.mb_x[self.current_mb_size:],
-                            self.mb_y[self.current_mb_size:])
-                    # curr_logits = self.mb_output[ self.current_mb_size:]
-                    curr_features = self.mb_features[self.current_mb_size:]
-
-                    curr_logits = pred[self.current_mb_size:]
-                    # curr_features = self.mb_features[ self.current_mb_size:]
-
-                with torch.no_grad():
-                    past_logits, past_features, _, _ = self.past_model(x,
-                                                                       other_paths=self.model.current_random_paths)
-                    # past_logits, past_features, _, _ = self.past_model(x, other_paths=None)
-
-                if self.gamma > 0:
-                    if self.layer_wise_regularization:
-                        all_lr = 0
-
-                        csf = len(self.experience.previous_classes)
-                        for cc, pp in zip(self.model.internal_features[:csf],
-                                          self.past_model.internal_features[
-                                          :csf]):
-
-                            for c, p in zip(cc, pp):
-                                c = torch.flatten(c, 1)[bs:]
-                                p = torch.flatten(p, 1)
-
-                                if self.logit_regularization == 'mse':
-                                    lr = nn.functional.mse_loss(c, p)
-                                elif self.logit_regularization == 'cosine':
-                                    lr = 1 - nn.functional.cosine_similarity(c,
-                                                                             p,
-                                                                             -1)
-                                    lr = lr.mean()
-                                else:
-                                    assert False
-
-                                all_lr += lr
-
-                        lr = (all_lr / csf).mean()
-
+                    if self.double_sampling:
+                        x, y, _ = self.sample_past_batch(bs)
+                        x, y = x.to(self.device), y.to(self.device)
+                        curr_logits, curr_features = self.model(x)[:2]
                     else:
-                        if self.logit_regularization == 'kl':
-                            curr_logits = torch.log_softmax(
-                                curr_logits / self.tau, -1)
-                            past_logits = torch.log_softmax(
-                                past_logits / self.tau, -1)
+                        x, y = (self.mb_x[self.current_mb_size:],
+                                self.mb_y[self.current_mb_size:])
+                        # curr_logits = self.mb_output[ self.current_mb_size:]
+                        curr_features = self.mb_features[self.current_mb_size:]
 
-                            lr = nn.functional.kl_div(curr_logits, past_logits,
-                                                      log_target=True,
-                                                      reduction='batchmean')
-                        elif self.logit_regularization == 'mse':
-                            # lr = nn.functional.mse_loss(curr_logits[:, :-classes],
-                            #                             past_logits[:, :-classes])
-                            lr = nn.functional.mse_loss(curr_logits,
-                                                        past_logits)
-                        elif self.logit_regularization == 'cosine':
-                            lr = 1 - nn.functional.cosine_similarity(
-                                curr_logits, past_logits, -1)
-                            lr = lr.mean()
+                        curr_logits = pred[self.current_mb_size:]
+                        # curr_features = self.mb_features[ self.current_mb_size:]
+
+                    with torch.no_grad():
+                        past_logits, past_features, _, _ = self.past_model(x,
+                                                                           other_paths=self.model.current_random_paths)
+                        # past_logits, past_features, _, _ = self.past_model(x, other_paths=None)
+
+                    if self.gamma > 0:
+                        if self.layer_wise_regularization:
+                            all_lr = 0
+
+                            csf = len(self.experience.previous_classes)
+                            for cc, pp in zip(self.model.internal_features[:csf],
+                                              self.past_model.internal_features[
+                                              :csf]):
+
+                                for c, p in zip(cc, pp):
+                                    c = torch.flatten(c, 1)[bs:]
+                                    p = torch.flatten(p, 1)
+
+                                    if self.logit_regularization == 'mse':
+                                        lr = nn.functional.mse_loss(c, p)
+                                    elif self.logit_regularization == 'cosine':
+                                        lr = 1 - nn.functional.cosine_similarity(c,
+                                                                                 p,
+                                                                                 -1)
+                                        lr = lr.mean()
+                                    else:
+                                        assert False
+
+                                    all_lr += lr
+
+                            lr = (all_lr / csf).mean()
+
                         else:
-                            assert False
+                            if self.logit_regularization == 'kl':
+                                curr_logits = torch.log_softmax(
+                                    curr_logits / self.tau, -1)
+                                past_logits = torch.log_softmax(
+                                    past_logits / self.tau, -1)
 
-                    loss += lr * self.gamma
+                                lr = nn.functional.kl_div(curr_logits, past_logits,
+                                                          log_target=True,
+                                                          reduction='batchmean')
+                            elif self.logit_regularization == 'mse':
+                                # lr = nn.functional.mse_loss(curr_logits[:, :-classes],
+                                #                             past_logits[:, :-classes])
+                                lr = nn.functional.mse_loss(curr_logits,
+                                                            past_logits)
+                            elif self.logit_regularization == 'cosine':
+                                lr = 1 - nn.functional.cosine_similarity(
+                                    curr_logits, past_logits, -1)
+                                lr = lr.mean()
+                            else:
+                                assert False
 
-                if self.delta > 0:
-                    classes = len(self.experience.classes_in_this_experience)
+                        loss += lr * self.gamma
 
-                    curr_features = curr_features
-                    past_features = past_features
+                    if self.delta > 0:
+                        classes = len(self.experience.classes_in_this_experience)
 
-                    dist = nn.functional.mse_loss(curr_features, past_features)
+                        curr_features = curr_features
+                        past_features = past_features
 
-                    loss += dist * self.delta
+                        dist = nn.functional.mse_loss(curr_features, past_features)
 
-            elif self.ot_logits is not None:
-                bs = len(self.mb_output) // 2
+                        loss += dist * self.delta
 
-                past_logits = self.ot_logits
+                elif self.ot_logits is not None:
+                    bs = len(self.mb_output) // 2
 
-                if self.gamma > 0:
-                    curr_logits = self.mb_output[bs:]
+                    past_logits = self.ot_logits
 
-                    lr = nn.functional.mse_loss(curr_logits, past_logits,
-                                                reduction='mean')
+                    if self.gamma > 0:
+                        curr_logits = self.mb_output[bs:]
 
-                    loss += lr * self.gamma
+                        lr = nn.functional.mse_loss(curr_logits, past_logits,
+                                                    reduction='mean')
+
+                        loss += lr * self.gamma
 
         return loss

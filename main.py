@@ -40,9 +40,9 @@ def avalanche_training(cfg: DictConfig):
 
     scenario = cfg['scenario']
     dataset = scenario['dataset']
-    scenario_name = scenario['scenario']
     n_tasks = scenario['n_tasks']
     task_incremental_learning = scenario['return_task_id']
+    permuted_dataset = scenario.get('permuted_dataset', False)
 
     shuffle = scenario['shuffle']
     shuffle_first = scenario.get('shuffle_first', False)
@@ -100,6 +100,7 @@ def avalanche_training(cfg: DictConfig):
         del cfg.model.head_classes
 
     experiments_results = []
+    tasks_split_dict = {}
 
     for exp_n in range(1, n_experiments + 1):
         log.info(f'Starting experiment {exp_n} (of {n_experiments})')
@@ -133,11 +134,19 @@ def avalanche_training(cfg: DictConfig):
                                         shuffle=shuffle_first if exp_n == 0 else shuffle,
                                         seed=seed, force_sit=force_sit,
                                         method_name=plugin_name,
+                                        permuted_dataset=permuted_dataset,
                                         dev_split=training.get('dev_split',
                                                                None))
 
         log.info(f'Original classes: {tasks.classes_order_original_ids}')
         log.info(f'Original classes per exp: {tasks.original_classes_in_exp}')
+
+        tasks_split_dict[seed] = {
+            'original_classes': tasks.classes_order_original_ids,
+            'tasks_classes': [list(v) for v in tasks.original_classes_in_exp]}
+
+        with open(os.path.join(base_path, 'tasks_split.json'), 'w') as f:
+            json.dump(tasks_split_dict, f, ensure_ascii=False, indent=4)
 
         if load and os.path.exists(results_path):
             print('model loaded')
