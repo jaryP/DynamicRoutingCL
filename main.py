@@ -45,7 +45,7 @@ def avalanche_training(cfg: DictConfig):
     permuted_dataset = scenario.get('permuted_dataset', False)
 
     shuffle = scenario['shuffle']
-    shuffle_first = scenario.get('shuffle_first', False)
+    shuffle_first = scenario.get('shuffle_first', True)
 
     model_cfg = cfg['model']
 
