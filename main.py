@@ -131,7 +131,7 @@ def avalanche_training(cfg: DictConfig):
 
         tasks = get_dataset_nc_scenario(name=dataset, n_tasks=n_tasks,
                                         til=task_incremental_learning,
-                                        shuffle=shuffle_first if exp_n == 0 else shuffle,
+                                        shuffle=shuffle,
                                         seed=seed, force_sit=force_sit,
                                         method_name=plugin_name,
                                         permuted_dataset=permuted_dataset,
