@@ -1,4 +1,5 @@
 from functools import lru_cache
+from itertools import permutations
 from typing import Optional
 
 import numpy as np
@@ -39,8 +40,11 @@ def get_permutation(n_classe):
     divisions = list(filter(lambda x: not 1 in x and len(x) > 1,
                             rule_asc(n_classe)))
 
-    selected = divisions[np.random.randint(0, len((divisions)))]
-    np.random.shuffle(selected)
+    all_divisions = []
+    for d in divisions:
+        all_divisions.extend(set(permutations(d)))
+
+    selected = all_divisions[np.random.randint(0, len((all_divisions)))]
 
     return {i: v for i, v in enumerate(selected)}
 
