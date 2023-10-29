@@ -187,6 +187,10 @@ def avalanche_training(cfg: DictConfig):
                     wandb_prefix = cfg.get('wandb_prefix', '')
 
                     wandb_name = f'{cfg.scenario.dataset}/{cfg.scenario.n_tasks}_{cfg.trainer_name}_{backbone.__class__.__name__}_{exp_n}'
+
+                    if permuted_dataset:
+                        wandb_name = 'RP_' + wandb_name
+
                     if wandb_prefix is not None and wandb_prefix != '':
                         wandb_name = wandb_prefix + wandb_name
 
