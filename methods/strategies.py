@@ -24,7 +24,7 @@ from methods.plugins.cml_utils import BatchNormModelWrap
 from methods.plugins.cope import ContinualPrototypeEvolution
 from methods.plugins.er import EmbeddingRegularizationPlugin
 from methods.plugins.ewc import EWCCustomPlugin
-from methods.plugins.ssil import SeparatedSoftmaxPlugin
+# from methods.plugins.ssil import SeparatedSoftmaxPlugin
 from models.utils import AvalanceCombinedModel
 
 

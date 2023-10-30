@@ -62,6 +62,9 @@ def avalanche_training(cfg: DictConfig):
     n_experiments = experiment.get('experiments', 1)
     load = experiment.get('load', True)
 
+    num_workers = experiment.get('num_workers', 0)
+    pin_memory = experiment.get('pin_memory', True)
+
     save = experiment.get('save', True)
     plot = experiment.get('plot', False)
     eval_every = experiment.get('eval_every', 5)

@@ -7,15 +7,11 @@ layers:
     stride: 1
   - _target_: torch.nn.MaxPool2d
     kernel_size: 2
-#  - _target_: torch.nn.BatchNorm2d
-#    num_features: 32
   - _target_: torch.nn.Conv2d
     in_channels: 32
     out_channels: 64
     kernel_size: 3
     stride: 1
-#  - _target_: torch.nn.BatchNorm2d
-#    num_features: 64
   - _target_: torch.nn.MaxPool2d
     kernel_size: 2
   - _target_: torch.nn.Conv2d
@@ -23,8 +19,6 @@ layers:
     out_channels: 128
     kernel_size: 3
     stride: 1
-#  - _target_: torch.nn.BatchNorm2d
-#    num_features: 128
   - _target_: torch.nn.AdaptiveMaxPool2d
     output_size: 1
   - _target_: torch.nn.Flatten
@@ -32,5 +26,5 @@ layers:
 backbone_output_dim: 128
 layers_block_n: 5
 future_paths_to_sample: 5
- : 'usage'
+path_selection_strategy: 'usage'
 prediction_mode: 'task'

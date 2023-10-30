@@ -379,8 +379,8 @@ class ContinuosRouting(SupervisedTemplate):
                 # w = self.clock.train_exp_epochs / self.warm_up_epochs
 
             if w >= 1 and self.past_margin > 0 and self.past_task_reg > 0:
-                # mx = neg_pred1.max(-1).values.detach()
-                mx = neg_pred1.max(-1).values
+                mx = neg_pred1.max(-1).values.detach()
+                # mx = neg_pred1.max(-1).values
                 mx_current_classes = pred1[range(len(pred1)), y1]
 
                 margin_dist = torch.maximum(torch.zeros_like(mx),
