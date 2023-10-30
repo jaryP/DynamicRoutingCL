@@ -86,6 +86,43 @@ class ContinuosRouting(SupervisedTemplate):
             plugins=plugins,
             evaluator=evaluator, eval_every=eval_every)
 
+    # def make_train_dataloader(
+    #     self,
+    #     num_workers=0,
+    #     shuffle=True,
+    #     pin_memory=None,
+    #     persistent_workers=False,
+    #     drop_last=False,
+    #     **kwargs
+    # ):
+    #     """Data loader initialization.
+    #
+    #     Called at the start of each learning experience after the dataset
+    #     adaptation.
+    #
+    #     :param num_workers: number of thread workers for the data loading.
+    #     :param shuffle: True if the data should be shuffled, False otherwise.
+    #     :param pin_memory: If True, the data loader will copy Tensors into CUDA
+    #         pinned memory before returning them. Defaults to True.
+    #     """
+    #
+    #     assert self.adapted_dataset is not None
+    #
+    #     torch.utils.data.DataLoader
+    #
+    #     other_dataloader_args = self._obtain_common_dataloader_parameters(
+    #         batch_size=self.train_mb_size,
+    #         num_workers=num_workers,
+    #         shuffle=shuffle,
+    #         pin_memory=pin_memory,
+    #         persistent_workers=persistent_workers,
+    #         drop_last=drop_last,
+    #     )
+    #
+    #     self.dataloader = DataLoader(
+    #         self.adapted_dataset, **other_dataloader_args
+    #     )
+
     def _after_forward(self, **kwargs):
         self.mb_output, self.mb_features, self.mb_future_logits, self.mb_future_features = self.mb_output
         super()._after_forward(**kwargs)

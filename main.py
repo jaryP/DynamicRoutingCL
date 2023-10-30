@@ -4,6 +4,7 @@ import os
 import random
 import warnings
 from collections import defaultdict
+from types import MethodType
 
 import hydra
 import numpy as np
@@ -15,9 +16,48 @@ from avalanche.training import DER
 from avalanche.training.plugins import EvaluationPlugin
 from omegaconf import DictConfig, OmegaConf
 from torch.nn import CrossEntropyLoss
+from torch.utils.data import DataLoader
 
 from base.scenario import get_dataset_nc_scenario
 from models.base import get_cl_model
+
+
+def make_train_dataloader(
+    self,
+    num_workers=0,
+    shuffle=True,
+    pin_memory=None,
+    persistent_workers=False,
+    drop_last=False,
+    **kwargs
+):
+    """Data loader initialization.
+
+    Called at the start of each learning experience after the dataset
+    adaptation.
+
+    :param num_workers: number of thread workers for the data loading.
+    :param shuffle: True if the data should be shuffled, False otherwise.
+    :param pin_memory: If True, the data loader will copy Tensors into CUDA
+        pinned memory before returning them. Defaults to True.
+    """
+
+    assert self.adapted_dataset is not None
+
+    torch.utils.data.DataLoader
+
+    other_dataloader_args = self._obtain_common_dataloader_parameters(
+        batch_size=self.train_mb_size,
+        num_workers=num_workers,
+        shuffle=shuffle,
+        pin_memory=pin_memory,
+        persistent_workers=persistent_workers,
+        drop_last=drop_last,
+    )
+
+    self.dataloader = DataLoader(
+        self.adapted_dataset, **other_dataloader_args
+    )
 
 
 def process_saving_path(sstring: str) -> str:
@@ -56,14 +96,12 @@ def avalanche_training(cfg: DictConfig):
     batch_size = training['batch_size']
 
     num_workers = training.get('num_workers', 0)
-    pin_memory = training.get('pin_memory', True)
+    pin_memory = training.get('pin_memory', False)
+    use_standard_dataloader = training.get('use_standard_dataloader', True)
 
     experiment = cfg['experiment']
     n_experiments = experiment.get('experiments', 1)
     load = experiment.get('load', True)
-
-    num_workers = experiment.get('num_workers', 0)
-    pin_memory = experiment.get('pin_memory', True)
 
     save = experiment.get('save', True)
     plot = experiment.get('plot', False)
@@ -248,6 +286,9 @@ def avalanche_training(cfg: DictConfig):
                 assert 'head_classes' in cfg.model, (
                     'When using DER strategy, '
                     'parameter model.head_classes must be specified.')
+
+            if use_standard_dataloader:
+                strategy.make_train_dataloader = MethodType(make_train_dataloader, strategy)
 
             results_after_each_task = []
             all_results = {}
