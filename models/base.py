@@ -10,7 +10,7 @@ import torch.nn.functional as F
 # from main_random_paths_random_centroids import RoutingModel
 from models import resnet20, resnet32, custom_vgg, RoutingModel, CondensedRoutingModel
 from models.utils import AvalanceCombinedModel, CustomMultiHeadClassifier, \
-    PytorchCombinedModel
+    PytorchCombinedModel, LocalSimilarityClassifier
 
 
 def get_backbone(name: str, channels: int = 3, **kwargs):
@@ -139,6 +139,8 @@ def get_cl_model(
     else:
         if is_stream or method_name == 'icarl':
             classifier = IncrementalClassifier(size)
+        elif method_name == 'podnet':
+            classifier = LocalSimilarityClassifier(size)
         else:
             if method_name == 'er':
                 classifier = CustomMultiHeadClassifier(size, heads_generator)

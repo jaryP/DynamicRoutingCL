@@ -5,6 +5,8 @@ from .routing import ContinuosRouting
 
 from .ssil import SeparatedSoftmax
 
+from .podnet import PodNet
+
 # AVAILABLE_METHODS = {
 #     'ssil': SeparatedSoftmax,
 #     'der': DER,

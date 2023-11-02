@@ -5,12 +5,13 @@ import random
 import warnings
 from collections import defaultdict
 from types import MethodType
+from typing import Sequence
 
 import hydra
 import numpy as np
 import torch
 from avalanche.benchmarks import data_incremental_benchmark
-from avalanche.logging import WandBLogger
+from avalanche.logging import WandBLogger, TextLogger
 
 from avalanche.training import DER
 from avalanche.training.plugins import EvaluationPlugin
@@ -98,6 +99,7 @@ def avalanche_training(cfg: DictConfig):
     num_workers = training.get('num_workers', 0)
     pin_memory = training.get('pin_memory', False)
     use_standard_dataloader = training.get('use_standard_dataloader', True)
+    dev_split = training.get('dev_split', None)
 
     experiment = cfg['experiment']
     n_experiments = experiment.get('experiments', 1)
@@ -176,8 +178,7 @@ def avalanche_training(cfg: DictConfig):
                                         seed=seed, force_sit=force_sit,
                                         method_name=plugin_name,
                                         permuted_dataset=permuted_dataset,
-                                        dev_split=training.get('dev_split',
-                                                               None))
+                                        dev_split=dev_split)
 
         log.info(f'Original classes: {tasks.classes_order_original_ids}')
         log.info(f'Original classes per exp: {tasks.original_classes_in_exp}')
@@ -222,29 +223,76 @@ def avalanche_training(cfg: DictConfig):
             metrics = hydra.utils.instantiate(cfg.evaluation.metrics)
 
             loggers = []
-            for ev in cfg.evaluation.loggers:
-                if 'WandBLogger' in ev['_target_']:
-                    wandb_group = cfg.get('wandb_group', None)
-                    wandb_prefix = cfg.get('wandb_prefix', '')
 
-                    wandb_name = f'{cfg.scenario.dataset}/{cfg.scenario.n_tasks}_{cfg.trainer_name}_{backbone.__class__.__name__}_{exp_n}'
+            if cfg.evaluation.get('enable_textlog', True):
+                loggers.append(TextLogger())
 
-                    if permuted_dataset:
-                        wandb_name = 'RP_' + wandb_name
+            if cfg.evaluation.get('enable_wandb', True):
+                wandb_group = cfg.get('wandb_group', None)
+                wandb_prefix = cfg.get('wandb_prefix', '')
 
-                    if wandb_prefix is not None and wandb_prefix != '':
-                        wandb_name = wandb_prefix + wandb_name
-
-                    wandb_dict = OmegaConf.to_container(cfg, resolve=True)
-                    wandb_dict['saving_path'] = experiment_path
-
-                    v = WandBLogger(project_name=cfg.core.project_name,
-                                    run_name=wandb_name,
-                                    params={'config': wandb_dict,
-                                            'reinit': True,
-                                            'group': wandb_group})
+                if dev_split is not None:
+                    tags = ['grid_search']
                 else:
-                    v = hydra.utils.instantiate(ev)
+                    tags = ['train']
+
+                _tags = cfg.get('wadnb_tags', [])
+                if not isinstance(_tags, Sequence):
+                    _tags = [_tags]
+                tags += _tags
+
+                wandb_name = f'{cfg.scenario.dataset}/{cfg.scenario.n_tasks}_{cfg.trainer_name}_{backbone.__class__.__name__}_{exp_n}'
+
+                if permuted_dataset:
+                    wandb_name = 'RP_' + wandb_name
+
+                if wandb_prefix is not None and wandb_prefix != '':
+                    wandb_name = wandb_prefix + wandb_name
+
+                wandb_dict = OmegaConf.to_container(cfg, resolve=True)
+                wandb_dict['saving_path'] = experiment_path
+
+                v = WandBLogger(project_name=cfg.core.project_name,
+                                run_name=wandb_name,
+                                params={'config': wandb_dict,
+                                        'reinit': True,
+                                        'group': wandb_group,
+                                        'tags': tags})
+
+            # for ev in cfg.evaluation.loggers:
+            #     if 'WandBLogger' in ev['_target_']:
+            #         wandb_group = cfg.get('wandb_group', None)
+            #         wandb_prefix = cfg.get('wandb_prefix', '')
+            #
+            #         if dev_split is not None:
+            #             tags = ['grid_search']
+            #         else:
+            #             tags = ['train']
+            #
+            #         _tags = cfg.get('wadnb_tags', [])
+            #         if not isinstance(_tags, Sequence):
+            #             _tags = [_tags]
+            #         tags += _tags
+            #
+            #         wandb_name = f'{cfg.scenario.dataset}/{cfg.scenario.n_tasks}_{cfg.trainer_name}_{backbone.__class__.__name__}_{exp_n}'
+            #
+            #         if permuted_dataset:
+            #             wandb_name = 'RP_' + wandb_name
+            #
+            #         if wandb_prefix is not None and wandb_prefix != '':
+            #             wandb_name = wandb_prefix + wandb_name
+            #
+            #         wandb_dict = OmegaConf.to_container(cfg, resolve=True)
+            #         wandb_dict['saving_path'] = experiment_path
+            #
+            #         v = WandBLogger(project_name=cfg.core.project_name,
+            #                         run_name=wandb_name,
+            #                         params={'config': wandb_dict,
+            #                                 'reinit': True,
+            #                                 'group': wandb_group,
+            #                                 'tags': tags})
+            #     else:
+            #         v = hydra.utils.instantiate(ev)
                 loggers.append(v)
 
             eval_plugin = EvaluationPlugin(
@@ -270,15 +318,27 @@ def avalanche_training(cfg: DictConfig):
                                                        device=device,
                                                        eval_every=eval_every)
                 else:
-                    strategy = hydra.utils.instantiate(cfg.method,
-                                                       model=model,
-                                                       criterion=criterion,
-                                                       optimizer=opt,
-                                                       train_epochs=epochs,
-                                                       train_mb_size=batch_size,
-                                                       evaluator=eval_plugin,
-                                                       device=device,
-                                                       eval_every=eval_every)
+                    if plugin_name == 'podnet':
+                        strategy = hydra.utils.instantiate(cfg.method,
+                                                           feature_extractor=model.feature_extractor,
+                                                           classifier=model.classifier,
+                                                           criterion=criterion,
+                                                           optimizer=opt,
+                                                           train_epochs=epochs,
+                                                           train_mb_size=batch_size,
+                                                           evaluator=eval_plugin,
+                                                           device=device,
+                                                           eval_every=eval_every)
+                    else:
+                        strategy = hydra.utils.instantiate(cfg.method,
+                                                           model=model,
+                                                           criterion=criterion,
+                                                           optimizer=opt,
+                                                           train_epochs=epochs,
+                                                           train_mb_size=batch_size,
+                                                           evaluator=eval_plugin,
+                                                           device=device,
+                                                           eval_every=eval_every)
             else:
                 assert False, f'Method not implemented yet {cfg}'
 

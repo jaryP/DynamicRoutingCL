@@ -1,0 +1,4 @@
+_target_: methods.PodNet
+lambda_c: 1
+mem_size: 200
+lambda_f: 1
