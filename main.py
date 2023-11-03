@@ -19,6 +19,7 @@ from omegaconf import DictConfig, OmegaConf
 from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader
 
+import methods.routing
 from base.scenario import get_dataset_nc_scenario
 from models.base import get_cl_model
 
@@ -306,8 +307,10 @@ def avalanche_training(cfg: DictConfig):
 
             criterion = CrossEntropyLoss()
 
+            method_name = hydra.utils.get_class(cfg.method._target_).__name__.lower()
+
             if cfg is not None and '_target_' in cfg.method:
-                if plugin_name == 'ICaRL':
+                if plugin_name == 'icarl':
                     strategy = hydra.utils.instantiate(cfg.method,
                                                        feature_extractor=model.feature_extractor,
                                                        classifier=model.classifier,
@@ -318,7 +321,7 @@ def avalanche_training(cfg: DictConfig):
                                                        device=device,
                                                        eval_every=eval_every)
                 else:
-                    if plugin_name == 'podnet':
+                    if method_name == 'podnet':
                         strategy = hydra.utils.instantiate(cfg.method,
                                                            feature_extractor=model.feature_extractor,
                                                            classifier=model.classifier,
