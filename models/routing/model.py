@@ -332,7 +332,13 @@ class RoutingModel(MultiTaskModule):
 
         probs = np.asarray(probs)
         mx = max(probs)
-        indexes = np.argwhere(probs == mx).reshape(-1)
+        if mx == 0:
+            indexes = np.arange(len(probs))
+        else:
+            indexes = np.argwhere(probs > 0).reshape(-1)
+
+        # indexes = np.argwhere(probs == mx).reshape(-1)
+        # indexes = np.argwhere(probs > 0).reshape(-1)
 
         x, y, _ = next(iter(DataLoader(experience.dataset, 256, shuffle=True)))
         if self.past_batch is not None:

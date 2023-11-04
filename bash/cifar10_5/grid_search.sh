@@ -63,13 +63,7 @@ routing)
         do
             for gamma in 1
             do
-                for pa in random usage inverse_usage
-                do
-                for pt in task
-                do
-              python main.py +scenario=cil_cifar10_5 +model=$MODEL +training=cifar10_5 +method=routing_cifar10 optimizer=adam device=$DEVICE experiment=dev method.mem_size=$memory method.past_margin=$past_margin  method.future_margin=$future_margin method.past_task_reg=$past_margin_w method.future_task_reg=1 method.gamma=$gamma hydra=search model.path_selection_strategy=$pa model.prediction_mode=$pt wandb_prefix=routing_model_search_
-            done
-            done
+              python main.py +scenario=cil_cifar10_5 +model=$MODEL +training=cifar10_5 +method=routing_cifar10 +method.reg_sampling_bs=12 training.epochs=50 optimizer=adam device=$DEVICE experiment=dev method.mem_size=$memory method.past_margin=$past_margin  method.future_margin=$future_margin method.past_task_reg=$past_margin_w method.future_task_reg=1 method.gamma=$gamma hydra=search wandb_prefix=routing_model_search_ evaluation.enable_wandb=False
             done
           done
         done
