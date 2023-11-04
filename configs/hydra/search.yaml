@@ -1,6 +1,6 @@
 #hydra:
 run:
-  dir: results/${scenario.scenario}/${trainer_name}/${process_saving_path:${hydra.job.override_dirname}}
+  dir: results/search/${scenario.scenario}/${trainer_name}/${process_saving_path:${hydra.job.override_dirname}}
 sweep:
   dir: results/multirun/${scenario.scenario}/${method.save_name}
   subdir: ${hydra.job.override_dirname}

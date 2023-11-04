@@ -67,7 +67,7 @@ class BlockRoutingLayer(DynamicModule):
 
         for m in self.blocks[block_id].modules():
             if hasattr(m, 'track_running_stats'):
-                m.track_running_stats = freeze
+                m.track_running_stats = not freeze
 
     def forward(self, x, block_id, **kwargs):
         if not isinstance(block_id, (list, tuple)):

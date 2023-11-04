@@ -17,7 +17,8 @@ class FactoryWrapper(nn.Module):
         super().__init__(*args, **kwargs)
 
         self._reset_parameters = len(list(module.parameters())) > 0
-        self.to_route = self._reset_parameters and not isinstance(module, _NormBase)
+        self.to_route = self._reset_parameters and not isinstance(module,
+                                                                  _NormBase)
 
         self.module = module
 
@@ -156,8 +157,7 @@ class RoutingModel(MultiTaskModule):
                 if key in used_blocks:
                     continue
                 block = layers[i].blocks[str(b)]
-                params = sum(p.numel() for p in block.parameters()
-                             if p.requires_grad)
+                params = sum(p.numel() for p in block.parameters())
                 used_blocks[key] = params
 
         return sum(used_blocks.values())
@@ -312,83 +312,93 @@ class RoutingModel(MultiTaskModule):
         self.n_classes_seen_so_far += task_classes
         to_samples = task_classes if self.prediction_mode == 'class' else 1
 
-        head = nn.Linear(self.backbone_output_dim, task_classes).to(device)
-        probs = []
-
-        used_blocks = set()
-        for c, (p, v) in self.assigned_paths.items():
-            for i, b in enumerate(p):
-                used_blocks.add(f'{i}_{b}')
-
-        for p, v in self.available_paths:
-            c = 0
-            for i, b in enumerate(p):
-                s = f'{i}_{b}'
-                if s in used_blocks:
-                    c += 1
-
-            c = c / len(p)
-            probs.append(c)
-
-        probs = np.asarray(probs)
-        mx = max(probs)
-        if mx == 0:
-            indexes = np.arange(len(probs))
-        else:
-            indexes = np.argwhere(probs > 0).reshape(-1)
-
-        # indexes = np.argwhere(probs == mx).reshape(-1)
-        # indexes = np.argwhere(probs > 0).reshape(-1)
-
-        x, y, _ = next(iter(DataLoader(experience.dataset, 256, shuffle=True)))
-        if self.past_batch is not None:
-            x = torch.cat((x, self.past_batch[0]))
-            y = torch.cat((y, self.past_batch[1]))
-
-        x, y = x.to(device), y.to(device)
-
-        paths = [self.available_paths[i] for i in indexes]
-        scores = [0] * len(paths)
-        past_paths = list(self.assigned_paths.values())
-
-        for i, p in enumerate(paths):
-            f = self.features(x, paths_to_use=[p])[0]
-            l = head(f).squeeze(1)
-
-            if len(past_paths) > 0:
-                pl = self.features(x, paths_to_use=past_paths)[1]
-                l = torch.cat((pl, l), 1)
-
-            loss = nn.functional.cross_entropy(l, y)
-            scores[i] = loss.item()
-
-        assigned_path = paths[np.argmin(scores)]
-        self.available_paths.remove(assigned_path)
-        self.assigned_paths[len(self.assigned_paths) + 1] = assigned_path
-        self.heads[str(assigned_path[1])] = head
-
-        if self.freeze_past_tasks or self.freeze_future_logits:
-            layers = [l for l in self.layers if
-                      isinstance(l, BlockRoutingLayer)]
-
-            for b, l in zip(assigned_path[0], layers):
-                l.freeze_block(b, False)
-
-            for p in self.heads[str(assigned_path[1])].parameters():
-                p.requires_grad_(True)
-
-        if self.freeze_projectors:
-            for _, v in self.assigned_paths.values():
-                for p in self.heads[str(v)].parameters():
-                    p.requires_grad_(False)
-
-        print(self.assigned_paths)
-
-        return
-        if (probs == mx).sum() > 1:
-            pass
-        else:
-            pass
+        # head = nn.Linear(self.backbone_output_dim, task_classes).to(device)
+        # probs = []
+        #
+        # used_blocks = set()
+        # for c, (p, v) in self.assigned_paths.items():
+        #     for i, b in enumerate(p):
+        #         used_blocks.add(f'{i}_{b}')
+        #
+        # for p, v in self.available_paths:
+        #     c = 0
+        #     for i, b in enumerate(p):
+        #         s = f'{i}_{b}'
+        #         if s in used_blocks:
+        #             c += 1
+        #
+        #     c = c / len(p)
+        #     probs.append(c)
+        #
+        # probs = np.asarray(probs)
+        # mx = max(probs)
+        # if mx == 0:
+        #     indexes = np.arange(len(probs))
+        # else:
+        #     indexes = np.argwhere(probs > 0).reshape(-1)
+        #
+        # # indexes = np.argwhere(probs == mx).reshape(-1)
+        # # indexes = np.argwhere(probs > 0).reshape(-1)
+        #
+        # x, y, _ = next(iter(DataLoader(experience.dataset, 256, shuffle=True)))
+        # if self.past_batch is not None:
+        #     x = torch.cat((x, self.past_batch[0]))
+        #     y = torch.cat((y, self.past_batch[1]))
+        #
+        # x, y = x.to(device), y.to(device)
+        #
+        # paths = [self.available_paths[i] for i in indexes]
+        # scores = [0] * len(paths)
+        # past_paths = list(self.assigned_paths.values())
+        #
+        # for i, p in enumerate(paths):
+        #     f = self.features(x, paths_to_use=[p])[0]
+        #     l = head(f).squeeze(1)
+        #
+        #     if len(past_paths) > 0:
+        #         pl = self.features(x, paths_to_use=past_paths)[1]
+        #         l = torch.cat((pl, l), 1)
+        #
+        #     loss = nn.functional.cross_entropy(l, y)
+        #     scores[i] = loss.item()
+        #
+        # past_assigned_paths = deepcopy(self.assigned_paths)
+        #
+        # assigned_path = paths[np.argmin(scores)]
+        # self.available_paths.remove(assigned_path)
+        # self.assigned_paths[len(self.assigned_paths) + 1] = assigned_path
+        # self.heads[str(assigned_path[1])] = head
+        #
+        # if self.freeze_past_tasks or self.freeze_future_logits:
+        #     layers = [l for l in self.layers if
+        #               isinstance(l, BlockRoutingLayer)]
+        #
+        #     for b, l in zip(assigned_path[0], layers):
+        #         l.freeze_block(b, False)
+        #
+        #     for p in self.heads[str(assigned_path[1])].parameters():
+        #         p.requires_grad_(True)
+        #
+        # if self.freeze_projectors:
+        #     for _, v in self.assigned_paths.values():
+        #         for p in self.heads[str(v)].parameters():
+        #             p.requires_grad_(False)
+        #
+        # if self.freeze_past_tasks:
+        #     for pt, v in past_assigned_paths.values():
+        #
+        #         # for p in self.heads[str(v)].parameters():
+        #         #     p.requires_grad_(False)
+        #
+        #         layers = [l for l in self.layers if
+        #                   isinstance(l, BlockRoutingLayer)]
+        #
+        #         for b, l in zip(pt, layers):
+        #             l.freeze_block(b)
+        #
+        # print(self.assigned_paths)
+        #
+        # return
 
         if self.path_selection_strategy == 'random' or len(
                 self.assigned_paths) == 0:
@@ -480,17 +490,7 @@ class RoutingModel(MultiTaskModule):
         else:
             assert False
 
-        if self.freeze_past_tasks:
-            for pt, v in self.assigned_paths.values():
-
-                for p in self.heads[str(v)].parameters():
-                    p.requires_grad_(False)
-
-                layers = [l for l in self.layers if
-                          isinstance(l, BlockRoutingLayer)]
-
-                for b, l in zip(pt, layers):
-                    l.freeze_block(b)
+        past_assigned_paths = deepcopy(self.assigned_paths)
 
         z = experience.classes_in_this_experience \
             if self.prediction_mode == 'class' else [
@@ -501,7 +501,8 @@ class RoutingModel(MultiTaskModule):
             self.assigned_paths[c] = p
 
             if self.prediction_mode == 'task':
-                l = nn.Linear(self.backbone_output_dim, task_classes)
+                l = nn.Linear(self.backbone_output_dim,
+                              self.n_classes_seen_so_far)
                 self.heads[str(p[1])] = l
 
             if self.freeze_past_tasks or self.freeze_future_logits:
@@ -518,6 +519,18 @@ class RoutingModel(MultiTaskModule):
             for _, v in self.assigned_paths.values():
                 for p in self.heads[str(v)].parameters():
                     p.requires_grad_(False)
+
+        if self.freeze_past_tasks:
+            for pt, v in past_assigned_paths.values():
+
+                for p in self.heads[str(v)].parameters():
+                    p.requires_grad_(False)
+
+                layers = [l for l in self.layers if
+                          isinstance(l, BlockRoutingLayer)]
+
+                for b, l in zip(pt, layers):
+                    l.freeze_block(b)
 
         print(self.assigned_paths)
 
@@ -589,7 +602,8 @@ class RoutingModel(MultiTaskModule):
         self.current_random_paths = random_paths
 
         if len(base_paths) > 0:
-            features, logits, _ = self.features(x, paths_to_use=base_paths)
+            features, logits, _ = self.features(x, paths_to_use=base_paths,
+                                                cumulative=True)
 
         if len(random_paths) > 0:
             random_features, random_logits, _ = (
@@ -610,7 +624,7 @@ class RoutingModel(MultiTaskModule):
 
         return logits, features, random_logits, random_features
 
-    def features(self, x, *, paths_to_use=None, **kwargs):
+    def features(self, x, *, paths_to_use=None, cumulative=False, **kwargs):
         if paths_to_use is not None:
             if isinstance(paths_to_use, Sequence):
                 if any(isinstance(v, int) for v in paths_to_use):
@@ -650,6 +664,8 @@ class RoutingModel(MultiTaskModule):
 
         features = torch.stack(f, 1)
 
+        cumulative = self.n_classes_seen_so_far > 0 and cumulative
+
         logits = []
         for i, (_, v) in enumerate(paths_to_use):
             l = self.heads[str(v)](features[:, i])
@@ -658,7 +674,24 @@ class RoutingModel(MultiTaskModule):
                 l = l / self.centroids_scaler[str(v)]
             logits.append(l)
 
-        logits = torch.cat(logits, 1)
+        # if (l.shape[-1] != self.n_classes_seen_so_far
+        #         and self.n_classes_seen_so_far > 0 and cumulative):
+        #     diff = self.n_classes_seen_so_far - l.shape[-1]
+        #     l = nn.functional.pad(l, (0, diff))
+
+        if any(ll.shape[-1] != self.n_classes_seen_so_far for ll in logits) and cumulative:
+            cum_logits = torch.zeros((len(logits[0]), self.n_classes_seen_so_far),
+                                     device=logits[0].device)
+            for l in logits:
+                if l.shape[-1] != self.n_classes_seen_so_far:
+                    diff = self.n_classes_seen_so_far - l.shape[-1]
+                    l = nn.functional.pad(l, (0, diff))
+
+                cum_logits = cum_logits + l
+            logits = cum_logits
+
+        else:
+            logits = torch.cat(logits, 1)
 
         return features, logits, feats
 
@@ -802,10 +835,10 @@ class CondensedRoutingModel(MultiTaskModule):
         for pt, v in paths.values():
 
             layer = nn.Sequential(nn.Flatten(1),
-                          nn.Sequential(nn.Linear(
-                              self.backbone_output_dim,
-                              1)),
-                          )
+                                  nn.Sequential(nn.Linear(
+                                      self.backbone_output_dim,
+                                      1)),
+                                  )
 
             for p in layer.parameters():
                 p.requires_grad_(False)
@@ -1112,4 +1145,3 @@ class CondensedRoutingModel(MultiTaskModule):
         logits = torch.cat(logits, 1)
 
         return features, logits, feats
-

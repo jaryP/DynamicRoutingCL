@@ -322,8 +322,11 @@ class ContinuosRouting(SupervisedTemplate):
                 # w = self.clock.train_exp_epochs / self.warm_up_epochs
 
             if w >= 1 and self.past_margin > 0 and self.past_task_reg > 0:
-                # mx = neg_pred1.max(-1).values.detach()
-                mx = neg_pred1.max(-1).values
+                mx = neg_pred1.max(-1).values.detach()
+
+                # mx = torch.softmax(neg_pred1, -1).max(-1).values
+                # mx = neg_pred1.max(-1).values
+                # sp = torch.softmax(pred1[:, self.experience.classes_in_this_experience], -1)
                 mx_current_classes = pred1[range(len(pred1)), y1]
 
                 margin_dist = torch.relu(
@@ -363,8 +366,8 @@ class ContinuosRouting(SupervisedTemplate):
                     if self.double_sampling > 0:
                         x, y, _ = self.sample_past_batch(self.double_sampling)
                         x, y = x.to(self.device), y.to(self.device)
-                        curr_logits, _, _, _ = self.model(x)
-                        # curr_logits = torch.cat((curr_logits, random_logits),-1)
+                        curr_logits, _, random_logits, _ = self.model(x)
+                        curr_logits = torch.cat((curr_logits, random_logits),-1)
                     else:
                         x, y = (self.mb_x[self.current_mb_size:],
                                 self.mb_y[self.current_mb_size:])
@@ -375,13 +378,13 @@ class ContinuosRouting(SupervisedTemplate):
                         # curr_features = self.mb_features[ self.current_mb_size:]
 
                     with torch.no_grad():
-                        # past_logits, past_features, _, _ = self.past_model(x, other_paths=self.model.current_random_paths)
-                        past_logits, past_features, _, _ = self.past_model(x,
-                                                                           other_paths=None)
+                        past_logits, past_features, _, _ = self.past_model(x, other_paths=self.model.current_random_paths)
+                        # past_logits, past_features, _, _ = self.past_model(x,
+                        #                                                    other_paths=None)
                         # curr_logits = curr_logits[:, :past_logits.shape[1]]
 
-                    if not self.double_sampling > 0:
-                        curr_logits = curr_logits[:, :past_logits.shape[-1]]
+                    # if not self.double_sampling > 0:
+                    #     curr_logits = curr_logits[:, :past_logits.shape[-1]]
 
                     if self.gamma > 0:
                         if self.logit_regularization == 'kl':
@@ -689,8 +692,8 @@ class ContinuosRoutingLogits(ContinuosRouting):
                 # w = self.clock.train_exp_epochs / self.warm_up_epochs
 
             if w >= 1 and self.past_margin > 0 and self.past_task_reg > 0:
-                # mx = neg_pred1.max(-1).values.detach()
-                mx = neg_pred1.max(-1).values
+                mx = neg_pred1.max(-1).values.detach()
+                # mx = neg_pred1.max(-1).values
                 mx_current_classes = pred1[range(len(pred1)), y1]
 
                 margin_dist = torch.maximum(torch.zeros_like(mx),

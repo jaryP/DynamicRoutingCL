@@ -50,20 +50,22 @@ oewc)
 #      done
 #    done
 #;;
+
 routing)
 #  routing_3l_convblock
 #  routing_3l_convblock_invusage
   for memory in 200 500 1000 2000
   do
-    for past_margin in 1 0.3 0.2
+    for past_margin in 1 0.5 0.25
      do
-      for past_margin_w in 0.5 0.1 0.01
+      for past_margin_w in 0.1 0.01 0.01
       do
         for future_margin in 5
         do
             for gamma in 1
             do
-              python main.py +scenario=cil_cifar10_5 +model=$MODEL +training=cifar10_5 +method=routing_cifar10 +method.reg_sampling_bs=12 training.epochs=50 optimizer=adam device=$DEVICE experiment=dev method.mem_size=$memory method.past_margin=$past_margin  method.future_margin=$future_margin method.past_task_reg=$past_margin_w method.future_task_reg=1 method.gamma=$gamma hydra=search wandb_prefix=routing_model_search_ evaluation.enable_wandb=False
+              python main.py +scenario=cil_cifar10_5 +model=$MODEL +training=cifar10_5 +method=routing_cifar10 +method.reg_sampling_bs=-1 training.epochs=20 optimizer=adam device=$DEVICE method.mem_size=$memory method.past_margin=$past_margin  method.future_margin=$future_margin method.past_task_reg=$past_margin_w method.future_task_reg=1 method.gamma=$gamma hydra=search wandb_prefix=lenovo_ +wadnb_tags=test
+              python main.py +scenario=cil_cifar10_5 +model=$MODEL +training=cifar10_5 +method=routing_cifar10 +method.reg_sampling_bs=32 training.epochs=50 optimizer=adam device=$DEVICE method.mem_size=$memory method.past_margin=$past_margin  method.future_margin=$future_margin method.past_task_reg=$past_margin_w method.future_task_reg=1 method.gamma=$gamma hydra=search wandb_prefix=lenovo_ +wadnb_tags=test
             done
           done
         done
