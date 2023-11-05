@@ -64,8 +64,8 @@ routing)
         do
             for gamma in 1
             do
-              python main.py +scenario=cil_cifar10_5 +model=$MODEL +training=cifar10_5 +method=routing_cifar10 +method.reg_sampling_bs=-1 training.epochs=20 optimizer=adam device=$DEVICE method.mem_size=$memory method.past_margin=$past_margin  method.future_margin=$future_margin method.past_task_reg=$past_margin_w method.future_task_reg=1 method.gamma=$gamma hydra=search wandb_prefix=lenovo_ +wadnb_tags=test
-              python main.py +scenario=cil_cifar10_5 +model=$MODEL +training=cifar10_5 +method=routing_cifar10 +method.reg_sampling_bs=32 training.epochs=50 optimizer=adam device=$DEVICE method.mem_size=$memory method.past_margin=$past_margin  method.future_margin=$future_margin method.past_task_reg=$past_margin_w method.future_task_reg=1 method.gamma=$gamma hydra=search wandb_prefix=lenovo_ +wadnb_tags=test
+              python main.py +scenario=cil_cifar10_5 +model=$MODEL +training=cifar10_5 +method=routing_cifar10 +method.reg_sampling_bs=-1 training.epochs=20 optimizer=adam device=$DEVICE method.mem_size=$memory method.past_margin=$past_margin  method.future_margin=$future_margin method.past_task_reg=$past_margin_w method.future_task_reg=1 method.gamma=$gamma hydra=search experiment=base1 wandb_prefix=lenovo_ +wadnb_tags=test
+              python main.py +scenario=cil_cifar10_5 +model=$MODEL +training=cifar10_5 +method=routing_cifar10 +method.reg_sampling_bs=32 training.epochs=50 optimizer=adam device=$DEVICE method.mem_size=$memory method.past_margin=$past_margin  method.future_margin=$future_margin method.past_task_reg=$past_margin_w method.future_task_reg=1 method.gamma=$gamma hydra=search experiment=base1 wandb_prefix=lenovo_ +wadnb_tags=test
             done
           done
         done
