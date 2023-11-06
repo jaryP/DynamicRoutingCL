@@ -70,10 +70,10 @@ class ContinuosRouting(SupervisedTemplate):
                  eval_every=-1,
                  ):
 
-        assert isinstance(model,
-                          (RoutingModel, CondensedRoutingModel)), (
-            f'When using '
-            f'{self.__class__.__name__} the model must be a ContinuosRouting one')
+        # assert isinstance(model,
+        #                   (RoutingModel, CondensedRoutingModel)), (
+        #     f'When using '
+        #     f'{self.__class__.__name__} the model must be a ContinuosRouting one')
 
         self.tasks_nclasses = dict()
         self.current_mb_size = 0
@@ -272,6 +272,8 @@ class ContinuosRouting(SupervisedTemplate):
             self.past_model = deepcopy(self.model)
             self.past_model.eval()
 
+            # self.future_margin = self.future_margin + self.past_margin * 4
+
     def criterion(self):
         # tid = self.experience.current_experience
 
@@ -295,13 +297,13 @@ class ContinuosRouting(SupervisedTemplate):
             pred = torch.cat((self.mb_output, self.mb_future_logits), 1)
 
         if len(self.past_dataset) == 0:
-            if isinstance(self.model, RoutingModel):
-                loss = nn.functional.cross_entropy(pred, self.mb_y,
-                                                   label_smoothing=0)
-            else:
-                log_p_y = torch.log_softmax(pred, dim=1)
-                loss = -log_p_y.gather(1, self.mb_y.unsqueeze(-1)).squeeze(
-                    -1).mean()
+            # if isinstance(self.model, RoutingModel):
+            loss = nn.functional.cross_entropy(pred, self.mb_y,
+                                               label_smoothing=0)
+            # else:
+            #     log_p_y = torch.log_softmax(pred, dim=1)
+            #     loss = -log_p_y.gather(1, self.mb_y.unsqueeze(-1)).squeeze(
+            #         -1).mean()
         else:
             s = self.current_mb_size
             s1 = len(self.mb_x) - s
@@ -337,18 +339,18 @@ class ContinuosRouting(SupervisedTemplate):
 
                 past_reg = past_reg * self.past_task_reg
 
-            if isinstance(self.model, RoutingModel):
-                loss1 = nn.functional.cross_entropy(pred1, y1)
-                loss2 = nn.functional.cross_entropy(pred2, y2)
-            else:
-                pred1 = torch.log_softmax(pred1, 1)
-                pred2 = torch.log_softmax(pred2, 1)
-                loss1 = -pred1.gather(1, y1.unsqueeze(-1)).squeeze(-1).mean()
-                loss2 = -pred2.gather(1, y2.unsqueeze(-1)).squeeze(-1).mean()
+            # if isinstance(self.model, RoutingModel):
+            loss1 = nn.functional.cross_entropy(pred1, y1)
+            loss2 = nn.functional.cross_entropy(pred2, y2)
+            # else:
+            #     pred1 = torch.log_softmax(pred1, 1)
+            #     pred2 = torch.log_softmax(pred2, 1)
+            #     loss1 = -pred1.gather(1, y1.unsqueeze(-1)).squeeze(-1).mean()
+            #     loss2 = -pred2.gather(1, y2.unsqueeze(-1)).squeeze(-1).mean()
 
             loss_val = loss1 + self.alpha * loss2
 
-            loss = loss_val + past_reg + future_reg
+            loss = loss_val + past_reg
 
             if self.is_training and any([self.gamma > 0, self.delta > 0]):
                 if self.scheduled_factor:
@@ -367,7 +369,8 @@ class ContinuosRouting(SupervisedTemplate):
                         x, y, _ = self.sample_past_batch(self.double_sampling)
                         x, y = x.to(self.device), y.to(self.device)
                         curr_logits, _, random_logits, _ = self.model(x)
-                        curr_logits = torch.cat((curr_logits, random_logits),-1)
+                        curr_logits = torch.cat((curr_logits, random_logits),
+                                                -1)
                     else:
                         x, y = (self.mb_x[self.current_mb_size:],
                                 self.mb_y[self.current_mb_size:])
@@ -378,10 +381,9 @@ class ContinuosRouting(SupervisedTemplate):
                         # curr_features = self.mb_features[ self.current_mb_size:]
 
                     with torch.no_grad():
-                        past_logits, past_features, _, _ = self.past_model(x, other_paths=self.model.current_random_paths)
-                        # past_logits, past_features, _, _ = self.past_model(x,
-                        #                                                    other_paths=None)
-                        # curr_logits = curr_logits[:, :past_logits.shape[1]]
+                        # past_logits, past_features, _, _ = self.past_model(x, other_paths=self.model.current_random_paths)
+                        past_logits, past_features, _, _ = self.past_model(x)
+                        curr_logits = curr_logits[:, :past_logits.shape[1]]
 
                     # if not self.double_sampling > 0:
                     #     curr_logits = curr_logits[:, :past_logits.shape[-1]]
@@ -426,16 +428,17 @@ class ContinuosRouting(SupervisedTemplate):
 
         if self.future_task_reg > 0 and self.future_margin > 0:
             future_logits = self.mb_future_logits
-            future_mx = future_logits.max(-1).values
+            # future_mx = future_logits.max(-1).values
+            future_mx = future_logits.min(-1).values
             current_mx = self.mb_output.max(-1).values
 
             reg = current_mx - future_mx - self.future_margin
             reg = torch.relu(reg)
 
-            # future_reg = reg[reg > 0].mean()
-            future_reg = reg.mean()
+            future_reg = reg[reg > 0].mean()
+            # future_reg = reg.mean()
 
-            future_reg = future_reg.mean() * self.future_task_reg
+            future_reg = future_reg * self.future_task_reg
 
             loss += future_reg
 
@@ -782,18 +785,18 @@ class ContinuosRoutingLogits(ContinuosRouting):
                     #
                     #     loss += dist * self.delta * factor
 
-                elif self.ot_logits is not None:
-                    bs = len(self.mb_output) // 2
-
-                    past_logits = self.ot_logits
-
-                    if self.gamma > 0:
-                        curr_logits = self.mb_output[bs:]
-
-                        lr = nn.functional.mse_loss(curr_logits, past_logits,
-                                                    reduction='mean')
-
-                        loss += lr * self.gamma
+                # elif self.ot_logits is not None:
+                #     bs = len(self.mb_output) // 2
+                #
+                #     past_logits = self.ot_logits
+                #
+                #     if self.gamma > 0:
+                #         curr_logits = self.mb_output[bs:]
+                #
+                #         lr = nn.functional.mse_loss(curr_logits, past_logits,
+                #                                     reduction='mean')
+                #
+                #         loss += lr * self.gamma
 
         if self.future_task_reg > 0 and self.future_margin > 0:
             future_logits = self.mb_future_logits
