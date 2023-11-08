@@ -47,7 +47,11 @@ class PaddedIncrementalClassifier(IncrementalClassifier):
 
         # update classifier weights
         if self.mode == 'future':
-            self.padding_units = new_nclasses - old_nclasses
+            if (old_nclasses + max(self.padding_units, 0)) >= new_nclasses:
+                return
+
+            padding = new_nclasses - old_nclasses
+            self.padding_units = padding
         else:
             if self.padding_units < 0:
                 self.padding_units = len(experience.previous_classes)
@@ -707,13 +711,13 @@ class RoutingModel(MultiTaskModule):
             random_features, random_logits = None, None
         elif self.forced_future > 0:
             features = torch.cat((features, random_features), 1)
-            logits = torch.cat((logits, random_logits), 1)
+            logits = logits + random_logits
             random_features, random_logits = None, None
 
         if other_paths is not None and len(other_paths) > 0:
             f, l, _ = self.features(x, paths_to_use=other_paths)
             features = torch.cat((features, f), 1)
-            logits = torch.cat((logits, l), 1)
+            logits = logits + l
 
         return logits, features, random_logits, random_features
 
@@ -802,12 +806,11 @@ class RoutingModel(MultiTaskModule):
         #
         # else:
         #     logits = torch.cat(logits, 1)
-
-        if (self.masking != 'none' and self.n_classes_seen_so_far > 0
-                and cumulative):
-            logits = torch.stack(logits, 0).sum(0)
-        else:
-            logits = torch.cat(logits, 1)
+        # if (self.masking != 'none' and self.n_classes_seen_so_far > 0
+        #         and cumulative):
+        #     logits = torch.stack(logits, 0).sum(0)
+        # else:
+        #     logits = torch.cat(logits, 1)
 
         return features, logits, feats
 
@@ -1368,7 +1371,8 @@ class MergingRoutingModel(MultiTaskModule):
         self.assigned_paths = {}
         self.n_classes_seen_so_far = 0
 
-        self.classifier = IncrementalClassifier(self.backbone_output_dim)
+        self.classifier = IncrementalClassifier(self.backbone_output_dim,
+                                                masking=False)
 
         if freeze_past_tasks or freeze_future_logits:
             for l in self.layers:
@@ -1398,146 +1402,6 @@ class MergingRoutingModel(MultiTaskModule):
                 used_blocks[key] = params
 
         return sum(used_blocks.values())
-
-    # def train_adaptation(self, experience):
-    #     if not self.adapt:
-    #         return
-    #     self.forced_future = 0
-    #
-    #     task_classes = len(experience.classes_in_this_experience)
-    #     self.n_classes_seen_so_far += task_classes
-    #     to_samples = task_classes if self.prediction_mode == 'class' else 1
-    #
-    #     if self.path_selection_strategy == 'random' or len(
-    #             self.assigned_paths) == 0:
-    #         selected_paths = np.random.choice(
-    #             np.arange(len(self.available_paths)),
-    #             to_samples,
-    #             replace=False)
-    #         paths = [self.available_paths[i] for i in selected_paths]
-    #
-    #     elif 'usage' in self.path_selection_strategy:
-    #         probs = []
-    #
-    #         used_blocks = set()
-    #         for c, (p, v) in self.assigned_paths.items():
-    #             for i, b in enumerate(p):
-    #                 used_blocks.add(f'{i}_{b}')
-    #
-    #         for p, v in self.available_paths:
-    #             c = 0
-    #             for i, b in enumerate(p):
-    #                 s = f'{i}_{b}'
-    #                 if s in used_blocks:
-    #                     c += 1
-    #
-    #             c = c / len(p)
-    #             probs.append(c)
-    #
-    #         probs = np.asarray(probs)
-    #
-    #         if self.path_selection_strategy == 'negative_usage':
-    #             probs -= max(probs)
-    #         elif self.path_selection_strategy == 'inverse_usage':
-    #             probs[probs > 0] = 1 / probs[probs > 0]
-    #
-    #         probs = probs / sum(probs)
-    #
-    #         selected_paths = np.random.choice(
-    #             np.arange(len(self.available_paths)),
-    #             to_samples,
-    #             replace=False,
-    #             p=probs)
-    #
-    #         paths = [self.available_paths[i] for i in selected_paths]
-    #
-    #     elif self.path_selection_strategy == 'gradient':
-    #
-    #         d = DataLoader(experience.dataset, batch_size=128, shuffle=True)
-    #         x, labels, _ = next(iter(d))
-    #         x = x.to(next(self.parameters()).device)
-    #
-    #         if self.prediction_mode == 'class':
-    #             xs = [x[labels == l] for l in torch.unique(labels)]
-    #         else:
-    #             xs = [x]
-    #
-    #         paths = []
-    #         with torch.enable_grad():
-    #             for x in xs:
-    #                 past_paths = list(self.assigned_paths.values())
-    #                 features, past_logits, _ = self.features(x,
-    #                                                          paths_to_use=past_paths)
-    #
-    #                 past_max = past_logits.max(-1).values.detach()
-    #                 best_val = (np.inf, None)
-    #
-    #                 for i in range(0, len(self.available_paths), 10):
-    #                     pts = self.available_paths[i:i + 10]
-    #
-    #                     features, logits, _ = self.features(x, paths_to_use=pts)
-    #
-    #                     alphas = nn.Parameter(torch.ones((1, logits.shape[-1]),
-    #                                                      device=next(
-    #                                                          self.parameters()).device))
-    #                     logits = logits * alphas
-    #
-    #                     diff = past_max[:, None] - logits
-    #                     diff = torch.maximum(torch.zeros_like(diff), diff)
-    #
-    #                     grad = torch.autograd.grad(diff.mean(), alphas,
-    #                                                retain_graph=False,
-    #                                                create_graph=False)[0]
-    #                     # grad = - grad
-    #                     (mn, val) = [v.item() for v in grad.min(-1)]
-    #                     val = pts[val]
-    #                     if mn < best_val[0] and val not in paths:
-    #                         best_val = (mn, val)
-    #
-    #                 paths.append(best_val[1])
-    #     else:
-    #         assert False
-    #
-    #     if self.freeze_past_tasks:
-    #         for pt, v in self.assigned_paths.values():
-    #
-    #             for p in self.heads[str(v)].parameters():
-    #                 p.requires_grad_(False)
-    #
-    #             layers = [l for l in self.layers if
-    #                       isinstance(l, BlockRoutingLayer)]
-    #
-    #             for b, l in zip(pt, layers):
-    #                 l.freeze_block(b)
-    #
-    #     z = experience.classes_in_this_experience \
-    #         if self.prediction_mode == 'class' else [
-    #         len(self.assigned_paths) + 1]
-    #
-    #     for c, p in zip(z, paths):
-    #         self.available_paths.remove(p)
-    #         self.assigned_paths[c] = p
-    #
-    #         if self.prediction_mode == 'task':
-    #             l = nn.Linear(self.backbone_output_dim, task_classes)
-    #             self.heads[str(p[1])] = l
-    #
-    #         if self.freeze_past_tasks or self.freeze_future_logits:
-    #             layers = [l for l in self.layers if
-    #                       isinstance(l, BlockRoutingLayer)]
-    #
-    #             for b, l in zip(p[0], layers):
-    #                 l.freeze_block(b, False)
-    #
-    #             for p in self.heads[str(p[1])].parameters():
-    #                 p.requires_grad_(True)
-    #
-    #     if self.freeze_projectors:
-    #         for _, v in self.assigned_paths.values():
-    #             for p in self.heads[str(v)].parameters():
-    #                 p.requires_grad_(False)
-    #
-    #     print(self.assigned_paths)
 
     def train_adaptation(self, experience):
         if not self.adapt:
@@ -1807,7 +1671,7 @@ class MergingRoutingModel(MultiTaskModule):
         random_features = None
         random_logits = None
 
-        features = None
+        current_features = None
         logits = None
 
         # if self.sample_wise_future_sampling and self.use_future and not self.forced_future > 0:
@@ -1864,50 +1728,49 @@ class MergingRoutingModel(MultiTaskModule):
         all_cs = []
 
         if len(base_paths) > 0:
-            f, cs, _ = self.features(x, paths_to_use=base_paths,
+            current_features, _, _ = self.features(x, paths_to_use=base_paths,
                                                 cumulative=True)
-            all_cs.append(cs)
-
-            features.append(f)
+            # all_cs.append(cs)
+            #
+            # features.append(f)
+            current_features = current_features.mean(1)
+            logits = self.classifier(current_features)
 
         if len(random_paths) > 0:
-            random_features, cs, _ = (
-                self.features(x, paths_to_use=random_paths))
+            random_features, random_logits, _ = (
+                self.features(x, paths_to_use=random_paths, feats=current_features))
             features.append(random_features)
 
-            # features = features + random_features
-            all_cs.append(cs)
+            # random_logits = self.classifier(random_features).view(len(x), -1)
 
-        # if features is None:
-        #     features, logits = random_features, random_logits
-        #     random_features, random_logits = None, None
-        # elif self.forced_future > 0:
-        #     features = torch.cat((features, random_features), 1)
-        #     # logits = torch.cat((logits, random_logits), 1)
-        #     random_features, random_logits = None, None
+            # random_logits = [self.classifier(f) for f in range]
+            # random_logits = torch.cat(random_logits, -1)
+            #
+            # features = features + random_features
+            # all_cs.append(cs)
+
+        if logits is None:
+            features, logits = random_features, random_logits
+            random_features, random_logits = None, None
+        elif self.forced_future > 0:
+            # features = torch.cat((features, random_features), 1)
+            logits = torch.cat((logits, random_logits), 1)
+            # features = torch.cat((features, random_features), 1)
+            random_features, random_logits = None, None
 
         if other_paths is not None and len(other_paths) > 0:
-            f, cs, _ = self.features(x, paths_to_use=other_paths)
+            current_features, cs, _ = self.features(x, paths_to_use=other_paths)
             # features = torch.cat((features, f), 1)
             # features = features + f
-            features.append(f)
-            all_cs.append(cs)
+            # logits = self.classifier(f.mean(1))
+            # features.append(f)
+            # all_cs.append(cs)
 
             # logits = torch.cat((logits, l), 1)
 
-        all_cs = torch.cat(all_cs, -1)
-        all_cs = nn.functional.gumbel_softmax(all_cs, tau=0.5,
-                                              hard=True, dim=-1)
-        # features = features / all_cs.sum(-1, keepdim=True)
-        # if len(features) > 1:
-        features = torch.cat(features, 1)
-        features = (features * all_cs[..., None]).sum(1)
-
-        logits = self.classifier(features)
-
         return logits, all_cs, random_logits, random_features
 
-    def features(self, x, *, paths_to_use=None, cumulative=False, **kwargs):
+    def features(self, x, *, paths_to_use=None, cumulative=False, to_add=None, **kwargs):
         if paths_to_use is not None:
             if isinstance(paths_to_use, Sequence):
                 if any(isinstance(v, int) for v in paths_to_use):
@@ -1946,6 +1809,8 @@ class MergingRoutingModel(MultiTaskModule):
             f = [ll(a) for a in _x]
 
         features = torch.stack(f, 1)
+        if to_add is not None:
+            features = features + to_add[:, None]
 
         logits = []
         cs = []
@@ -2011,4 +1876,5 @@ class MergingRoutingModel(MultiTaskModule):
         # else:
         # logits = torch.cat(logits, 1)
 
-        return features, cs, feats
+        logits = torch.cat(logits,1)
+        return features, logits, feats

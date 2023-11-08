@@ -6,24 +6,24 @@ layers:
     kernel_size: 3
     stride: 1
   - _target_: torch.nn.ReLU
-  - _target_: torch.nn.MaxPool2d
-    kernel_size: 2
+#  - _target_: torch.nn.MaxPool2d
+#    kernel_size: 2
 
   - _target_: torch.nn.Conv2d
     in_channels: 32
     out_channels: 64
     kernel_size: 3
-    stride: 1
-  - _target_: torch.nn.MaxPool2d
-    kernel_size: 2
+    stride: 2
+#  - _target_: torch.nn.MaxPool2d
+#    kernel_size: 2
   - _target_: torch.nn.ReLU
 
   - _target_: torch.nn.Conv2d
     in_channels: 64
     out_channels: 128
     kernel_size: 3
-    stride: 1
-  - _target_: torch.nn.ReLU
+    stride: 2
+#  - _target_: torch.nn.ReLU
 
   - _target_: torch.nn.AdaptiveAvgPool2d
     output_size: 1

@@ -75,6 +75,7 @@ class ContinuosRouting(SupervisedTemplate):
         #     f'When using '
         #     f'{self.__class__.__name__} the model must be a ContinuosRouting one')
 
+        self.future_margins = []
         self.tasks_nclasses = dict()
         self.current_mb_size = 0
 
@@ -86,7 +87,7 @@ class ContinuosRouting(SupervisedTemplate):
 
         # Past task loss weight
         self.alpha = alpha
-
+        
         self.past_task_reg = past_task_reg
         self.past_margin = past_margin
         self.warm_up_epochs = warm_up_epochs
@@ -99,7 +100,7 @@ class ContinuosRouting(SupervisedTemplate):
 
         # Past task logits weight
         self.gamma = gamma
-        self.logit_regularization = 'mse'
+        self.logit_regularization = 'kl'
         self.tau = 1
 
         self.memory_size = mem_size
@@ -125,10 +126,15 @@ class ContinuosRouting(SupervisedTemplate):
 
     def _after_forward(self, **kwargs):
         self.mb_output, self.mb_features, self.mb_future_logits, self.mb_future_features = self.mb_output
+        self.mb_future_logits = torch.cat(self.mb_future_logits, -1)
+
         super()._after_forward(**kwargs)
 
     def _after_eval_forward(self, **kwargs):
-        self.mb_output, self.mb_features, self.mb_future_logits, self.mb_future_features = self.mb_output
+        logits, self.mb_features, self.mb_future_logits, self.mb_future_features = self.mb_output
+        self.mb_output = torch.cat(logits, -1)
+        # self.mb_future_logits = torch.cat(self.mb_future_logits, -1)
+
         super()._after_forward(**kwargs)
 
     def _after_training_iteration(self, **kwargs):
@@ -272,167 +278,189 @@ class ContinuosRouting(SupervisedTemplate):
             self.past_model = deepcopy(self.model)
             self.past_model.eval()
 
-            # self.future_margin = self.future_margin + self.past_margin * 4
+        self.future_margins.append(self.future_margin)
+        self.future_margin = self.future_margin + self.past_margin * 2
+        # self.future_margins.append(self.future_margin)
 
     def criterion(self):
         # tid = self.experience.current_experience
 
         if not self.is_training:
-            if isinstance(self.model, RoutingModel):
-                loss_val = nn.functional.cross_entropy(self.mb_output,
-                                                       self.mb_y)
-            else:
-                log_p_y = torch.log_softmax(self.mb_output, dim=1)
-                loss_val = -log_p_y.gather(1, self.mb_y.unsqueeze(-1)).squeeze(
-                    -1).mean()
+            loss_val = nn.functional.cross_entropy(self.mb_output,
+                                                   self.mb_y)
 
             return loss_val
 
         past_reg = 0
         future_reg = 0
 
-        pred = self.mb_output
-
-        if self.mb_future_logits is not None:
-            pred = torch.cat((self.mb_output, self.mb_future_logits), 1)
+        # pred = self.mb_output
+        #
+        # if self.mb_future_logits is not None:
+        #     pred = torch.cat((self.mb_output, self.mb_future_logits), 1)
 
         if len(self.past_dataset) == 0:
-            # if isinstance(self.model, RoutingModel):
+            pred = torch.cat(self.mb_output, -1)
+            if self.mb_future_logits is not None:
+                pred = torch.cat((pred, self.mb_future_logits), -1)
+
             loss = nn.functional.cross_entropy(pred, self.mb_y,
                                                label_smoothing=0)
-            # else:
-            #     log_p_y = torch.log_softmax(pred, dim=1)
-            #     loss = -log_p_y.gather(1, self.mb_y.unsqueeze(-1)).squeeze(
-            #         -1).mean()
         else:
-            s = self.current_mb_size
-            s1 = len(self.mb_x) - s
+            ce_loss = 0
+            margin_loss = 0
 
-            pred1, pred2 = torch.split(pred, [s, s1], 0)
-            y1, y2 = torch.split(self.mb_y, [s, s1], 0)
+            bs = len(self.mb_x)
 
-            y1 = y1 - min(
-                self.experience.classes_in_this_experience)  # min(classes_in_this_experience)
+            for t in torch.unique(self.mb_task_id):
+                mask = self.mb_task_id == t
 
-            neg_pred1 = pred1[:, :len(self.experience.previous_classes)]
-            pred1 = pred1[:, len(self.experience.previous_classes):]
+                y = self.mb_y[mask]
+                co = torch.cat(self.mb_output[t.item():], -1)[mask]
 
-            w = 1
-            if self.warm_up_epochs > 0:
-                w = float(
-                    self.clock.train_exp_epochs / self.warm_up_epochs >= 1)
-                # w = self.clock.train_exp_epochs / self.warm_up_epochs
+                if t > 0:
+                    past = torch.cat(self.mb_output[:t.item()], -1)[mask]
+                    y = y - past.shape[-1]
 
-            if w >= 1 and self.past_margin > 0 and self.past_task_reg > 0:
-                mx = neg_pred1.max(-1).values.detach()
+                    past_max = past.max(-1).values
 
-                # mx = torch.softmax(neg_pred1, -1).max(-1).values
-                # mx = neg_pred1.max(-1).values
-                # sp = torch.softmax(pred1[:, self.experience.classes_in_this_experience], -1)
-                mx_current_classes = pred1[range(len(pred1)), y1]
+                    mx_current_classes = co[range(len(co)), y]
 
-                margin_dist = torch.relu(
-                    mx - mx_current_classes + self.past_margin)
+                    margin_dist = torch.relu(past_max - mx_current_classes + self.past_margin)
+                    past_reg = margin_dist.sum()
+                    margin_loss += past_reg
 
-                # past_reg = margin_dist[margin_dist > 0].mean()
-                past_reg = margin_dist.mean()
+                present = torch.cat((co, self.mb_future_logits[mask]), -1)
 
-                past_reg = past_reg * self.past_task_reg
+                loss = nn.functional.cross_entropy(present, y, reduction='sum')
 
-            # if isinstance(self.model, RoutingModel):
-            loss1 = nn.functional.cross_entropy(pred1, y1)
-            loss2 = nn.functional.cross_entropy(pred2, y2)
-            # else:
-            #     pred1 = torch.log_softmax(pred1, 1)
-            #     pred2 = torch.log_softmax(pred2, 1)
-            #     loss1 = -pred1.gather(1, y1.unsqueeze(-1)).squeeze(-1).mean()
-            #     loss2 = -pred2.gather(1, y2.unsqueeze(-1)).squeeze(-1).mean()
+                ce_loss += loss
 
-            loss_val = loss1 + self.alpha * loss2
+            margin_loss = (margin_loss / bs) * self.past_task_reg
+            ce_loss = (ce_loss / bs)
 
-            loss = loss_val + past_reg
+            loss = ce_loss + margin_loss
 
-            if self.is_training and any([self.gamma > 0, self.delta > 0]):
-                if self.scheduled_factor:
-                    current_classes = len(
-                        self.experience.classes_in_this_experience)
-                    seen_classes = len(self.experience.classes_seen_so_far)
+            # pred1, pred2 = torch.split(pred, [s, s1], 0)
+            # y1, y2 = torch.split(self.mb_y, [s, s1], 0)
+            #
+            # y1 = y1 - min(
+            #     self.experience.classes_in_this_experience)  # min(classes_in_this_experience)
+            #
+            # neg_pred1 = pred1[:, :len(self.experience.previous_classes)]
+            # pred1 = pred1[:, len(self.experience.previous_classes):]
+            #
+            # w = 1
+            # if self.warm_up_epochs > 0:
+            #     w = float(self.clock.train_exp_epochs / self.warm_up_epochs >= 1)
+            #
+            # if w >= 1 and self.past_margin > 0 and self.past_task_reg > 0:
+            #     # mx = neg_pred1.max(-1).values.detach()
+            #
+            #     mx = neg_pred1.max(-1).values
+            #     mx_current_classes = pred1[range(len(pred1)), y1]
+            #
+            #     margin_dist = torch.relu(mx - mx_current_classes + self.past_margin)
+            #
+            #     # margin_dist = mx - mx_current_classes + self.past_margin
+            #
+            #     # past_reg = margin_dist[margin_dist > 0].mean()
+            #     past_reg = margin_dist.mean()
+            #
+            #     past_reg = past_reg * self.past_task_reg
+            #
+            # loss1 = nn.functional.cross_entropy(pred1, y1)
+            # loss2 = nn.functional.cross_entropy(pred2, y2)
+            #
+            # loss_val = loss1 + self.alpha * loss2
+            #
+            # loss = loss_val + past_reg
 
-                    factor = (seen_classes / current_classes) ** 0.5
-                else:
-                    factor = 1
-
-                if self.past_model is not None:
-                    bs = len(self.mb_output) // 2
-
-                    if self.double_sampling > 0:
-                        x, y, _ = self.sample_past_batch(self.double_sampling)
-                        x, y = x.to(self.device), y.to(self.device)
-                        curr_logits, _, random_logits, _ = self.model(x)
-                        curr_logits = torch.cat((curr_logits, random_logits),
-                                                -1)
-                    else:
-                        x, y = (self.mb_x[self.current_mb_size:],
-                                self.mb_y[self.current_mb_size:])
-                        # curr_logits = self.mb_output[ self.current_mb_size:]
-                        curr_features = self.mb_features[self.current_mb_size:]
-
-                        curr_logits = pred[self.current_mb_size:]
-                        # curr_features = self.mb_features[ self.current_mb_size:]
-
-                    with torch.no_grad():
-                        # past_logits, past_features, _, _ = self.past_model(x, other_paths=self.model.current_random_paths)
-                        past_logits, past_features, _, _ = self.past_model(x)
-                        curr_logits = curr_logits[:, :past_logits.shape[1]]
-
-                    # if not self.double_sampling > 0:
-                    #     curr_logits = curr_logits[:, :past_logits.shape[-1]]
-
-                    if self.gamma > 0:
-                        if self.logit_regularization == 'kl':
-                            curr_logits = torch.log_softmax(
-                                curr_logits / self.tau, -1)
-                            past_logits = torch.log_softmax(
-                                past_logits / self.tau, -1)
-
-                            lr = nn.functional.kl_div(curr_logits, past_logits,
-                                                      log_target=True,
-                                                      reduction='batchmean')
-                        elif self.logit_regularization == 'mse':
-                            classes = len(self.past_dataset)
-                            # lr = nn.functional.mse_loss(curr_logits[:, classes:],
-                            #                             past_logits[:, classes:])
-                            lr = nn.functional.mse_loss(curr_logits,
-                                                        past_logits)
-                        elif self.logit_regularization == 'cosine':
-                            lr = 1 - nn.functional.cosine_similarity(
-                                curr_logits, past_logits, -1)
-                            lr = lr.mean()
-                        else:
-                            assert False
-
-                        loss += lr * self.gamma * factor
-
-                    if self.delta > 0:
-                        classes = len(
-                            self.experience.classes_in_this_experience)
-
-                        a = curr_features
-                        b = past_features
-
-                        dist = nn.functional.mse_loss(a, b)
-                        # dist = 1 - nn.functional.cosine_similarity(a, b, -1)
-                        dist = dist.mean()
-
-                        loss += dist * self.delta * factor
+            # if self.is_training and any([self.gamma > 0, self.delta > 0]):
+            #     if self.scheduled_factor:
+            #         current_classes = len(
+            #             self.experience.classes_in_this_experience)
+            #         seen_classes = len(self.experience.classes_seen_so_far)
+            #
+            #         factor = (seen_classes / current_classes) ** 0.5
+            #     else:
+            #         factor = 1
+            #
+            #     if self.past_model is not None:
+            #         bs = len(self.mb_output) // 2
+            #
+            #         if self.double_sampling > 0:
+            #             x, y, _ = self.sample_past_batch(self.double_sampling)
+            #             x, y = x.to(self.device), y.to(self.device)
+            #             curr_logits, _, random_logits, _ = self.model(x)
+            #             curr_logits = torch.cat((curr_logits, random_logits),
+            #                                     -1)
+            #         else:
+            #             x, y = (self.mb_x[self.current_mb_size:],
+            #                     self.mb_y[self.current_mb_size:])
+            #             # curr_logits = self.mb_output[ self.current_mb_size:]
+            #             curr_features = self.mb_features[self.current_mb_size:]
+            #
+            #             curr_logits = pred[self.current_mb_size:]
+            #             # curr_features = self.mb_features[ self.current_mb_size:]
+            #
+            #         with torch.no_grad():
+            #             # past_logits, past_features, _, _ = self.past_model(x, other_paths=self.model.current_random_paths)
+            #             past_logits, past_features, _, _ = self.past_model(x)
+            #             curr_logits = curr_logits[:, :past_logits.shape[1]]
+            #
+            #         # if not self.double_sampling > 0:
+            #         #     curr_logits = curr_logits[:, :past_logits.shape[-1]]
+            #
+            #         if self.gamma > 0:
+            #             if self.logit_regularization == 'kl':
+            #                 curr_logits = torch.log_softmax(
+            #                     curr_logits / self.tau, -1)
+            #                 past_logits = torch.log_softmax(
+            #                     past_logits / self.tau, -1)
+            #
+            #                 lr = nn.functional.kl_div(curr_logits, past_logits,
+            #                                           log_target=True,
+            #                                           reduction='batchmean')
+            #             elif self.logit_regularization == 'mse':
+            #                 classes = len(self.past_dataset)
+            #                 # lr = nn.functional.mse_loss(curr_logits[:, classes:],
+            #                 #                             past_logits[:, classes:])
+            #
+            #                 lr = nn.functional.mse_loss(curr_logits,
+            #                                             past_logits)
+            #             elif self.logit_regularization == 'cosine':
+            #                 lr = 1 - nn.functional.cosine_similarity(
+            #                     curr_logits, past_logits, -1)
+            #                 lr = lr.mean()
+            #             else:
+            #                 assert False
+            #
+            #             loss += lr * self.gamma * factor
+            #
+            #         if self.delta > 0:
+            #             classes = len(
+            #                 self.experience.classes_in_this_experience)
+            #
+            #             a = curr_features
+            #             b = past_features
+            #
+            #             dist = nn.functional.mse_loss(a, b)
+            #             # dist = 1 - nn.functional.cosine_similarity(a, b, -1)
+            #             dist = dist.mean()
+            #
+            #             loss += dist * self.delta * factor
 
         if self.future_task_reg > 0 and self.future_margin > 0:
             future_logits = self.mb_future_logits
             # future_mx = future_logits.max(-1).values
             future_mx = future_logits.min(-1).values
-            current_mx = self.mb_output.max(-1).values
+            current_mx = torch.cat(self.mb_output, -1).max(-1).values
 
-            reg = current_mx - future_mx - self.future_margin
+            margins = torch.tensor(self.future_margins, device=self.device)
+            reg = current_mx - future_mx - margins[self.mb_task_id]
+
+            # reg = current_mx - future_mx - self.future_margin
             reg = torch.relu(reg)
 
             future_reg = reg[reg > 0].mean()
@@ -491,23 +519,15 @@ class ContinuosRoutingLogits(ContinuosRouting):
 
         classes_so_far = len(self.experience.classes_seen_so_far)
 
-        self.model.past_batch = self.sample_past_batch(256)
-
-        if not isinstance(self.model, CondensedRoutingModel):
-            return
+        # self.model.past_batch = self.sample_past_batch(256)
+        #
+        # if not isinstance(self.model, CondensedRoutingModel):
+        #     return
 
         if classes_so_far > len(self.experience.classes_in_this_experience):
             dataset = torch.utils.data.ConcatDataset(self.past_dataset.values())
 
-            past_model = deepcopy(self.model).eval()
-
-            new_head = nn.Linear(self.model.backbone_output_dim,
-                                 classes_so_far).to(self.device)
-            self.model.condensed_model[-1] = new_head
-
-            assigned_paths = self.model.assigned_paths
-
-            optimizer = SGD(self.model.condensed_model.parameters(), lr=0.01)
+            optimizer = SGD(self.model.parameters(), lr=0.01)
 
             datalaoder = DataLoader(dataset, len(dataset) // 20, shuffle=True)
             self.model.train()
@@ -517,21 +537,15 @@ class ContinuosRoutingLogits(ContinuosRouting):
                 for x, y, _ in datalaoder:
                     x, y = x.to(self.device), y.to(self.device)
 
-                    with torch.no_grad():
-                        past_logits = past_model(x)[0]
+                    current_logits = self.model(x)[0]
 
-                    current_logits = self.model.condensed_model(x)
-
-                    loss = nn.functional.mse_loss(current_logits, past_logits)
+                    loss = nn.functional.cross_entropy(current_logits, y)
 
                     optimizer.zero_grad()
                     loss.backward()
                     optimizer.step()
 
                     losses.append(loss.item())
-
-            self.model.reallocate_paths(assigned_paths)
-            self.model.use_condensed_model = True
 
     def sample_past_batch(self, batch_size, strict=True):
         classes = self.past_dataset
