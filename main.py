@@ -15,7 +15,7 @@ from avalanche.logging import WandBLogger, TextLogger
 
 from avalanche.training import DER
 from avalanche.training.plugins import EvaluationPlugin
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig, OmegaConf, ListConfig
 from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader
 
@@ -238,8 +238,10 @@ def avalanche_training(cfg: DictConfig):
                     tags = ['train']
 
                 _tags = cfg.get('wadnb_tags', [])
-                if not isinstance(_tags, Sequence):
+                print(_tags, type(_tags))
+                if not isinstance(_tags, ListConfig):
                     _tags = [_tags]
+                print(_tags)
                 tags += _tags
 
                 wandb_name = f'{cfg.scenario.dataset}/{cfg.scenario.n_tasks}_{cfg.trainer_name}_{backbone.__class__.__name__}_{exp_n}'
