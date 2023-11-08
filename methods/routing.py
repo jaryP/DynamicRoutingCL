@@ -357,7 +357,7 @@ class ContinuosRouting(SupervisedTemplate):
             loss = ce_loss + margin_loss
 
             if any([self.gamma > 0, self.delta > 0]):
-                if self.scheduled_factor:
+                if self.scheduled_factor or True:
                     current_classes = len(
                         self.experience.classes_in_this_experience)
                     seen_classes = len(self.experience.classes_seen_so_far)
@@ -435,7 +435,7 @@ class ContinuosRouting(SupervisedTemplate):
                         # ce_loss += loss
 
                     past_reg_loss = past_reg_loss / (len(x) / 2)
-                    loss = loss + past_reg_loss * self.gamma
+                    loss = loss + past_reg_loss * self.gamma * factor
 
                     # if self.gamma > 0:
                     #     if self.logit_regularization == 'kl':
