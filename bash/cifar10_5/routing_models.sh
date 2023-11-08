@@ -23,7 +23,7 @@ do
       do
           for gamma in 1 0.8 0.6 0.5
           do
-            python main.py +scenario=cil_cifar10_5 +model=routing_5l_convblock_p +training=cifar10_5 +method=routing_cifar10 +method.reg_sampling_bs=-1 training.epochs=20 optimizer=adam device=$DEVICE method.mem_size=$memory method.past_margin=$past_margin  method.future_margin=$future_margin method.past_task_reg=$past_margin_w method.future_task_reg=1 method.gamma=$gamma hydra=search experiment=base1 wandb_prefix=lenovo_ +wadnb_tags=search
+            python main.py +scenario=cil_cifar10_5 +model=routing_5l_convblock_p +training=cifar10_5 +method=routing_cifar10 +method.reg_sampling_bs=-1 training.epochs=20 optimizer=adam device=$DEVICE method.mem_size=$memory method.past_margin=$past_margin  method.future_margin=$future_margin method.past_task_reg=$past_margin_w method.future_task_reg=1 method.gamma=$gamma hydra=search experiment=base1 wandb_prefix=lenovo_ +wadnb_tags=[search]
           done
         done
       done
