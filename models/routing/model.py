@@ -77,6 +77,26 @@ class PaddedIncrementalClassifier(IncrementalClassifier):
         return out
 
 
+class PastClassifier(nn.Module):
+    def __init__(self,
+                 in_features,
+                 classes,
+                 past_classes):
+        super().__init__()
+        self.classifier = torch.nn.Linear(in_features, classes)
+        self.past_offsets = nn.ModuleList(
+            [torch.nn.Linear(in_features, c) for c in past_classes])
+
+    def forward(self, x, **kwargs):
+        out = self.classifier(x)
+        past_out = None
+        if len(self.past_offsets) > 0:
+            # past_out = [l(x) for l in self.past_offsets]
+            past_out = [(l(x) + 10).sigmoid() for l in self.past_offsets]
+
+        return out, past_out
+
+
 class FactoryWrapper(nn.Module):
     def __init__(self, module: nn.Module, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -203,6 +223,7 @@ class RoutingModel(MultiTaskModule):
 
         self.available_paths = paths
         self.assigned_paths = {}
+        self.classes_in_path = {}
         self.n_classes_seen_so_far = 0
 
         if freeze_past_tasks or freeze_future_logits:
@@ -574,30 +595,39 @@ class RoutingModel(MultiTaskModule):
         for c, p in zip(z, paths):
             self.available_paths.remove(p)
             self.assigned_paths[c] = p
+            self.classes_in_path[c] = task_classes
 
             if self.prediction_mode == 'task':
-                if self.masking == 'none':
+                if self.masking == 'past' and len(self.assigned_paths) > 1:
+                    l = PastClassifier(self.backbone_output_dim,
+                                       len(experience.classes_in_this_experience),
+                                       list(self.classes_in_path.values())[:-1])
+                else:
                     l = nn.Linear(self.backbone_output_dim,
                                   len(experience.classes_in_this_experience))
-                elif self.masking == 'past':
-                    # l = nn.Linear(self.backbone_output_dim,
-                    #               self.n_classes_seen_so_far)
-                    l = PaddedIncrementalClassifier(self.backbone_output_dim,
-                                                    'future',
-                                                    self.n_classes_seen_so_far,
-                                                    masking=False)
-                elif self.masking == 'full':
-                    l = IncrementalClassifier(self.backbone_output_dim,
-                                              self.n_classes_seen_so_far,
-                                              masking=False)
-                elif self.masking == 'future':
-                    # l = IncrementalClassifier(self.backbone_output_dim,
-                    #                           len(experience.classes_in_this_experience),
-                    #                           masking=False)
-                    l = PaddedIncrementalClassifier(self.backbone_output_dim,
-                                                    'past',
-                                                    len(experience.classes_in_this_experience),
-                                                    masking=False)
+
+                # if self.masking == 'none':
+                #     l = nn.Linear(self.backbone_output_dim,
+                #                   len(experience.classes_in_this_experience))
+                # elif self.masking == 'past':
+                #     # l = nn.Linear(self.backbone_output_dim,
+                #     #               self.n_classes_seen_so_far)
+                #     l = PaddedIncrementalClassifier(self.backbone_output_dim,
+                #                                     'future',
+                #                                     self.n_classes_seen_so_far,
+                #                                     masking=False)
+                # elif self.masking == 'full':
+                #     l = IncrementalClassifier(self.backbone_output_dim,
+                #                               self.n_classes_seen_so_far,
+                #                               masking=False)
+                # elif self.masking == 'future':
+                #     # l = IncrementalClassifier(self.backbone_output_dim,
+                #     #                           len(experience.classes_in_this_experience),
+                #     #                           masking=False)
+                #     l = PaddedIncrementalClassifier(self.backbone_output_dim,
+                #                                     'past',
+                #                                     len(experience.classes_in_this_experience),
+                #                                     masking=False)
                 # l = nn.Linear(self.backbone_output_dim,
                 #               len(experience.classes_in_this_experience))
                 self.heads[str(p[1])] = l
@@ -806,11 +836,21 @@ class RoutingModel(MultiTaskModule):
         #
         # else:
         #     logits = torch.cat(logits, 1)
-        # if (self.masking != 'none' and self.n_classes_seen_so_far > 0
-        #         and cumulative):
-        #     logits = torch.stack(logits, 0).sum(0)
-        # else:
-        #     logits = torch.cat(logits, 1)
+
+        if (self.masking != 'none' and self.n_classes_seen_so_far > 0
+                and cumulative and len(logits) > 1):
+            base_logits = logits[0]
+            for i, (l, sig) in enumerate(logits[1:]):
+                sig = torch.cat(sig, -1)
+                # base_logits = base_logits + sig
+                base_logits = base_logits * sig
+                base_logits = torch.cat((base_logits, l), -1)
+
+            lens = list(self.classes_in_path.values())
+            # logits = torch.stack(logits, 0).sum(0)
+            # if sum(lens) < logits.shape[-1]:
+            #     lens += [logits.shape[-1] - sum(lens)]
+            logits = list(torch.split(base_logits, lens, -1))
 
         return features, logits, feats
 
@@ -1364,7 +1404,8 @@ class MergingRoutingModel(MultiTaskModule):
                                                    self.backbone_output_dim,
                                                    1)),
                                                )
-            self.centroids[str(i)] = nn.Parameter(torch.randn(1, self.backbone_output_dim) * 0.1)
+            self.centroids[str(i)] = nn.Parameter(
+                torch.randn(1, self.backbone_output_dim) * 0.1)
             paths[i] = (p, i)
 
         self.available_paths = paths
@@ -1729,7 +1770,7 @@ class MergingRoutingModel(MultiTaskModule):
 
         if len(base_paths) > 0:
             current_features, _, _ = self.features(x, paths_to_use=base_paths,
-                                                cumulative=True)
+                                                   cumulative=True)
             # all_cs.append(cs)
             #
             # features.append(f)
@@ -1738,7 +1779,8 @@ class MergingRoutingModel(MultiTaskModule):
 
         if len(random_paths) > 0:
             random_features, random_logits, _ = (
-                self.features(x, paths_to_use=random_paths, feats=current_features))
+                self.features(x, paths_to_use=random_paths,
+                              feats=current_features))
             features.append(random_features)
 
             # random_logits = self.classifier(random_features).view(len(x), -1)
@@ -1770,7 +1812,8 @@ class MergingRoutingModel(MultiTaskModule):
 
         return logits, all_cs, random_logits, random_features
 
-    def features(self, x, *, paths_to_use=None, cumulative=False, to_add=None, **kwargs):
+    def features(self, x, *, paths_to_use=None, cumulative=False, to_add=None,
+                 **kwargs):
         if paths_to_use is not None:
             if isinstance(paths_to_use, Sequence):
                 if any(isinstance(v, int) for v in paths_to_use):
@@ -1876,5 +1919,5 @@ class MergingRoutingModel(MultiTaskModule):
         # else:
         # logits = torch.cat(logits, 1)
 
-        logits = torch.cat(logits,1)
+        logits = torch.cat(logits, 1)
         return features, logits, feats

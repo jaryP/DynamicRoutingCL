@@ -302,7 +302,8 @@ class ContinuosRouting(SupervisedTemplate):
         if len(self.past_dataset) == 0:
             pred = torch.cat(self.mb_output, -1)
             if self.mb_future_logits is not None:
-                pred = torch.cat((pred, self.mb_future_logits), -1)
+                # pred = torch.cat((pred, self.mb_future_logits), -1)
+                pred = torch.cat((pred, self.mb_future_logits.detach()), -1)
 
             loss = nn.functional.cross_entropy(pred, self.mb_y,
                                                label_smoothing=0)
@@ -327,13 +328,22 @@ class ContinuosRouting(SupervisedTemplate):
 
                 if t > 0:
                     past = torch.cat(self.mb_output[:t.item()], -1)[mask]
+
+                    distr = torch.cat((past, co), -1)
+                    distr = torch.softmax(distr, -1)
+
+                    mx_current_classes = distr[range(len(co)), y]
+                    past_max = distr[:, :past.shape[-1]].max(-1).values
+
                     y = y - past.shape[-1]
 
-                    past_max = past.max(-1).values
+                    # past_max = past.max(-1).values.detach()
+                    # past_max = past.max(-1).values
+                    #
+                    # mx_current_classes = co[range(len(co)), y]
 
-                    mx_current_classes = co[range(len(co)), y]
-
-                    margin_dist = torch.relu(past_max - mx_current_classes + self.past_margin)
+                    # margin_dist = torch.relu(past_max - mx_current_classes + self.past_margin)
+                    margin_dist = torch.relu(past_max - mx_current_classes + (1 / (distr.shape[-1] - 1)))
 
                     den_mask = margin_dist > 0
                     margin_den += den_mask.sum().item()
@@ -342,7 +352,8 @@ class ContinuosRouting(SupervisedTemplate):
 
                     margin_loss += past_reg
 
-                present = torch.cat((co, self.mb_future_logits[mask]), -1)
+                present = torch.cat((co, self.mb_future_logits[mask].detach()), -1)
+                # present = co
 
                 loss = nn.functional.cross_entropy(present, y, reduction='sum')
 
@@ -357,7 +368,7 @@ class ContinuosRouting(SupervisedTemplate):
             loss = ce_loss + margin_loss
 
             if any([self.gamma > 0, self.delta > 0]):
-                if self.scheduled_factor or True:
+                if self.scheduled_factor:
                     current_classes = len(
                         self.experience.classes_in_this_experience)
                     seen_classes = len(self.experience.classes_seen_so_far)
@@ -388,53 +399,52 @@ class ContinuosRouting(SupervisedTemplate):
                     #     # curr_features = self.mb_features[ self.current_mb_size:]
 
                     with torch.no_grad():
-                        # past_logits, past_features, _, _ = self.past_model(x, other_paths=self.model.current_random_paths)
+                        # past_logits, past_features, future_logits, _ = self.past_model(x, other_paths=self.model.current_random_paths)
                         past_logits = self.past_model(x)[0]
                         # curr_logits = curr_logits[:, :past_logits.shape[1]]
-
                     # if not self.double_sampling > 0:
                     #     curr_logits = curr_logits[:, :past_logits.shape[-1]]
 
                     past_reg_loss = 0
 
-                    for t in torch.unique(tids):
-                        if t == tid:
-                            continue
+                    if self.alpha <= 0:
+                        mask = tids != tid
 
-                        mask = tids == t
-
-                        _y = y[mask]
-                        co = torch.cat(curr_logits[t.item():], -1)[mask]
-                        po = torch.cat(past_logits[t.item():], -1)[mask]
-
+                        co = torch.cat(curr_logits, -1)[mask]
+                        po = torch.cat(past_logits, -1)[mask]
                         lr = nn.functional.mse_loss(co, po, reduction='sum')
-                        # lr = nn.functional.kl_div(torch.log_softmax(co, -1),
-                        #                           torch.softmax(po, -1), reduction='sum')
-                        past_reg_loss += lr
 
-                        # if t > 0:
-                        #     past = torch.cat(self.mb_output[:t.item()], -1)[
-                        #         mask]
-                        #     y = y - past.shape[-1]
-                        #
-                        #     past_max = past.max(-1).values
-                        #
-                        #     mx_current_classes = co[range(len(co)), y]
-                        #
-                        #     margin_dist = torch.relu(
-                        #         past_max - mx_current_classes + self.past_margin)
-                        #     past_reg = margin_dist.sum()
-                        #     margin_loss += past_reg
-                        #
-                        # present = torch.cat((co, self.mb_future_logits[mask]),
-                        #                     -1)
-                        #
-                        # loss = nn.functional.cross_entropy(present, y,
-                        #                                    reduction='sum')
-                        #
-                        # ce_loss += loss
+                        past_reg_loss = lr / mask.sum()
 
-                    past_reg_loss = past_reg_loss / (len(x) / 2)
+                        # for pl, cl in zip(past_logits, curr_logits):
+                        #     pl = pl[mask]
+                        #     cl = cl[mask]
+                        #
+                        #     # cl = nn.functional.normalize(cl, 2, -1)
+                        #     # pl = nn.functional.normalize(pl, 2, -1)
+                        #     # lr = nn.functional.kl_div(torch.log_softmax(cl, -1),
+                        #     #                           torch.softmax(pl, -1),
+                        #     #                           reduction='batchmean')
+                        #     lr = nn.functional.mse_loss(cl, pl, reduction='mean')
+                        #     past_reg_loss += lr
+                    else:
+                        for t in torch.unique(tids):
+                            if t == tid:
+                                continue
+
+                            mask = tids == t
+
+                            _y = y[mask]
+                            co = torch.cat(curr_logits[t.item():], -1)[mask]
+                            po = torch.cat(past_logits[t.item():], -1)[mask]
+
+                            lr = nn.functional.mse_loss(co, po, reduction='sum')
+                            # lr = nn.functional.kl_div(torch.log_softmax(co, -1),
+                            #                           torch.softmax(po, -1), reduction='sum')
+                            past_reg_loss += lr
+
+                        past_reg_loss = past_reg_loss / (len(x) / 2)
+
                     loss = loss + past_reg_loss * self.gamma * factor
 
                     # if self.gamma > 0:
@@ -476,20 +486,30 @@ class ContinuosRouting(SupervisedTemplate):
                     #
                     #     loss += dist * self.delta * factor
 
+        future_reg = 0
         if self.future_task_reg > 0 and self.future_margin > 0:
             future_logits = self.mb_future_logits
             # future_mx = future_logits.max(-1).values
-            future_mx = future_logits.min(-1).values
+            # mn = future_logits.min()
+            # if mn < 0:
+            #     future_logits = future_logits - mn
+            future_mx = future_logits.min(-1).values.detach()
             current_mx = torch.cat(self.mb_output, -1).max(-1).values
 
-            margins = torch.tensor(self.future_margins, device=self.device)
-            reg = current_mx - future_mx - margins[self.mb_task_id]
+            # margins = torch.tensor(self.future_margins, device=self.device)
+            # reg = current_mx - future_mx - margins[self.mb_task_id]
+
+            margin = self.future_margin
+            # margin = torch.where(current_mx > 0,
+            #                      - future_mx - margin,
+            #                      + future_mx - margin)
+            reg = current_mx - future_mx - margin
 
             # reg = current_mx - future_mx - self.future_margin
             reg = torch.relu(reg)
-
-            future_reg = reg[reg > 0].mean()
-            # future_reg = reg.mean()
+            mask = reg > 0
+            if any(mask):
+                future_reg = reg[mask].mean()
 
             future_reg = future_reg * self.future_task_reg
 
