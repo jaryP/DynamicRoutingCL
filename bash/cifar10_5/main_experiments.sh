@@ -30,10 +30,10 @@ cumulative)
 #  python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=icarl_2000   device="$DEVICE"
 #;;
 replay)
-  python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=replay_200 optimizer=sgd  device="$DEVICE"
-  python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=replay_500 optimizer=sgd  device="$DEVICE"
-  python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=replay_1000 optimizer=sgd  device="$DEVICE"
-  python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=replay_2000 optimizer=sgd  device="$DEVICE"
+  python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=replay_200   device="$DEVICE"
+  python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=replay_500   device="$DEVICE"
+  python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=replay_1000   device="$DEVICE"
+  python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=replay_2000   device="$DEVICE"
 ;;
 ssil)
   python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=ssil_200   device="$DEVICE" training.epochs=100

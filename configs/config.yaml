@@ -1,5 +1,5 @@
 core:
-  project_name: 'routing-cl'
+  project_name: 'margin_cl'
   dataset_root: ./dataset/
   results_path: ./results
   version: 1
