@@ -11,7 +11,7 @@ der)
     do
       for beta in 0.1 0.2 0.5 0.8 1.0
       do
-        python main.py +scenario=cil_cifar10_5 +model="$MODEL" +training=cifar10_5 +method=der_default optimizer=adam device=$DEVICE +model.head_classes=100 method.alpha=$alpha method.beta=$beta experiment=dev method.mem_size=$memory hydra=search
+        python main.py +scenario=cil_cifar10_5 +model="$MODEL" +training=cifar10_5 +method=der_default device=$DEVICE head.initial_out_features=100 method.alpha=$alpha method.beta=$beta experiment=dev method.mem_size=$memory hydra=search +wadnb_tags=[grid_search]
       done
     done
   done
@@ -50,6 +50,21 @@ oewc)
 #      done
 #    done
 #;;
+margin)
+  for memory in 200 500 1000 2000
+  do
+      for past_margin_w in 1 0.5 0.1 0.01 0.01
+      do
+            for gamma in 0.1 0.5 1
+            do
+            for alpha in 0.1 0.5 1
+            do
+              python main.py +scenario=cil_cifar10_5 +model=$MODEL +training=cifar10_5 +method=margin_cifar10 device=$DEVICE method.mem_size=$memory method.past_task_reg=$past_margin_w method.gamma=$gamma hydra=search experiment=base1 +wadnb_tags=[grid_search]
+            done
+            done
+        done
+    done
+;;
 
 routing)
 #  routing_3l_convblock

@@ -136,15 +136,15 @@ def avalanche_training(cfg: DictConfig):
     force_sit = True if plugin_name == 'der' else False
     force_sit = False
 
-    head_classes = cfg.model.get('head_classes', None)
-    if plugin_name == 'der':
-        assert head_classes is not None, (
-            'When using DER you must specify '
-            'the head dimension of the model, '
-            'by setting head_classes parameter'
-            'in the config file.')
-
-        del cfg.model.head_classes
+    # head_classes = cfg.model.get('head_classes', None)
+    # if plugin_name == 'der':
+    #     assert head_classes is not None, (
+    #         'When using DER you must specify '
+    #         'the head dimension of the model, '
+    #         'by setting head_classes parameter'
+    #         'in the config file.')
+    #
+    #     del cfg.model.head_classes
 
     experiments_results = []
     tasks_split_dict = {}
@@ -223,6 +223,16 @@ def avalanche_training(cfg: DictConfig):
                 o = backbone(x)
 
                 size = np.prod(o.shape)
+
+                initial_out_features = cfg.head.get('initial_out_features', None)
+                if plugin_name == 'der':
+                    assert initial_out_features is None, (
+                        'When using DER you must specify '
+                        'the head dimension of the model, '
+                        'by setting head_classes parameter'
+                        'in the config file.')
+
+                    del cfg.model.head_classes
 
                 head = hydra.utils.instantiate(cfg.head, in_features=size)
 
@@ -337,10 +347,10 @@ def avalanche_training(cfg: DictConfig):
             else:
                 assert False, f'Method not implemented yet {cfg}'
 
-            if isinstance(strategy, DER) and head_classes is None:
-                assert 'head_classes' in cfg.model, (
-                    'When using DER strategy, '
-                    'parameter model.head_classes must be specified.')
+            # if isinstance(strategy, DER) and head_classes is None:
+            #     assert 'head_classes' in cfg.model, (
+            #         'When using DER strategy, '
+            #         'parameter model.head_classes must be specified.')
 
             if use_standard_dataloader:
                 strategy.make_train_dataloader = MethodType(make_train_dataloader, strategy)

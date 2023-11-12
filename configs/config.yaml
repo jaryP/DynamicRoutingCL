@@ -8,7 +8,7 @@ core:
 defaults:
   - hydra: base
   - optimizer: sgd
-  - head: null
+  - head: inceremental
   - model: null
   - experiment: base
   - evaluation: default
