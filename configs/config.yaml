@@ -8,6 +8,8 @@ core:
 defaults:
   - hydra: base
   - optimizer: sgd
+  - head: null
+  - model: null
   - experiment: base
   - evaluation: default
   - override hydra/job_logging: console
@@ -16,3 +18,4 @@ defaults:
 device: cpu
 trainer_name: ${method_path:${method._target_}}
 wandb_prefix: null
+wandb_tags: null

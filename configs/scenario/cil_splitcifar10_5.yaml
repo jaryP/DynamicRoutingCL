@@ -1,0 +1,7 @@
+_target_: avalanche.benchmarks.classic.SplitCIFAR10
+n_experiences: 5
+return_task_id: False
+shuffle: True
+class_ids_from_zero_from_first_exp: True
+dataset: cifar10
+scenario: splitcifar10

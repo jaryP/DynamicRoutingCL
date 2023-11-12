@@ -733,8 +733,10 @@ class RoutingModel(MultiTaskModule):
                                                 cumulative=True)
 
         if len(random_paths) > 0:
-            random_features, random_logits, _ = (
-                self.features(x, paths_to_use=random_paths))
+            with torch.set_grad_enabled(self.freeze_future_logits), \
+                  torch.inference_mode(self.freeze_future_logits):
+                random_features, random_logits, _ = (
+                    self.features(x, paths_to_use=random_paths))
 
         if features is None:
             features, logits = random_features, random_logits

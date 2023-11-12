@@ -12,6 +12,7 @@ import numpy as np
 import torch
 from avalanche.benchmarks import data_incremental_benchmark
 from avalanche.logging import WandBLogger, TextLogger
+from avalanche.models import IncrementalClassifier
 
 from avalanche.training import DER
 from avalanche.training.plugins import EvaluationPlugin
@@ -22,6 +23,8 @@ from torch.utils.data import DataLoader
 import methods.routing
 from base.scenario import get_dataset_nc_scenario
 from models.base import get_cl_model
+from models.utils import AvalanceCombinedModel, ScaledClassifier, \
+    PytorchCombinedModel
 
 
 def make_train_dataloader(
@@ -213,13 +216,33 @@ def avalanche_training(cfg: DictConfig):
 
             backbone = hydra.utils.instantiate(cfg.model)
 
-            model = get_cl_model(backbone=backbone,
-                                 model_name='',
-                                 input_shape=tuple(img.shape),
-                                 method_name=plugin_name,
-                                 head_classes=head_classes,
-                                 is_class_incremental_learning=is_cil,
-                                 **model_cfg)
+            # TODO: add cml, add podnet
+
+            if plugin_name not in ['cope', 'mcml']:
+                x = torch.randn((1,) + tuple(img.shape))
+                o = backbone(x)
+
+                size = np.prod(o.shape)
+
+                head = hydra.utils.instantiate(cfg.head, in_features=size)
+
+                if plugin_name == 'margin':
+                    assert isinstance(head, ScaledClassifier)
+                elif plugin_name == 'icarl':
+                    assert isinstance(head, IncrementalClassifier)
+
+                if plugin_name == 'margin':
+                    model = PytorchCombinedModel(backbone, head)
+                else:
+                    model = AvalanceCombinedModel(backbone, head)
+
+            # model = get_cl_model(backbone=backbone,
+            #                      model_name='',
+            #                      input_shape=tuple(img.shape),
+            #                      method_name=plugin_name,
+            #                      head_classes=head_classes,
+            #                      is_class_incremental_learning=is_cil,
+            #                      **model_cfg)
 
             metrics = hydra.utils.instantiate(cfg.evaluation.metrics)
 
@@ -237,12 +260,13 @@ def avalanche_training(cfg: DictConfig):
                 else:
                     tags = ['train']
 
-                _tags = cfg.get('wadnb_tags', [])
-                print(_tags, type(_tags))
-                if not isinstance(_tags, ListConfig):
-                    _tags = [_tags]
-                print(_tags)
-                tags += _tags
+                _tags = cfg.get('wadnb_tags', None)
+                if _tags is not None:
+                    print(_tags, type(_tags))
+                    if not isinstance(_tags, ListConfig):
+                        _tags = [_tags]
+                    print(_tags)
+                    tags += _tags
 
                 wandb_name = f'{cfg.scenario.dataset}/{cfg.scenario.n_tasks}_{cfg.trainer_name}_{backbone.__class__.__name__}_{exp_n}'
 
@@ -262,40 +286,6 @@ def avalanche_training(cfg: DictConfig):
                                         'group': wandb_group,
                                         'tags': tags})
 
-            # for ev in cfg.evaluation.loggers:
-            #     if 'WandBLogger' in ev['_target_']:
-            #         wandb_group = cfg.get('wandb_group', None)
-            #         wandb_prefix = cfg.get('wandb_prefix', '')
-            #
-            #         if dev_split is not None:
-            #             tags = ['grid_search']
-            #         else:
-            #             tags = ['train']
-            #
-            #         _tags = cfg.get('wadnb_tags', [])
-            #         if not isinstance(_tags, Sequence):
-            #             _tags = [_tags]
-            #         tags += _tags
-            #
-            #         wandb_name = f'{cfg.scenario.dataset}/{cfg.scenario.n_tasks}_{cfg.trainer_name}_{backbone.__class__.__name__}_{exp_n}'
-            #
-            #         if permuted_dataset:
-            #             wandb_name = 'RP_' + wandb_name
-            #
-            #         if wandb_prefix is not None and wandb_prefix != '':
-            #             wandb_name = wandb_prefix + wandb_name
-            #
-            #         wandb_dict = OmegaConf.to_container(cfg, resolve=True)
-            #         wandb_dict['saving_path'] = experiment_path
-            #
-            #         v = WandBLogger(project_name=cfg.core.project_name,
-            #                         run_name=wandb_name,
-            #                         params={'config': wandb_dict,
-            #                                 'reinit': True,
-            #                                 'group': wandb_group,
-            #                                 'tags': tags})
-            #     else:
-            #         v = hydra.utils.instantiate(ev)
                 loggers.append(v)
 
             eval_plugin = EvaluationPlugin(
@@ -401,6 +391,11 @@ def avalanche_training(cfg: DictConfig):
                                              tasks.test_stream[:i + 1]],
                                          pin_memory=pin_memory,
                                          num_workers=num_workers)
+
+                    # res = strategy.train(experiences=experience,
+                    #                      eval_streams=tasks.test_stream[0],
+                    #                      pin_memory=pin_memory,
+                    #                      num_workers=num_workers)
 
                     all_results = strategy.evaluator.get_all_metrics()
 

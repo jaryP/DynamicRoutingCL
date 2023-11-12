@@ -206,3 +206,62 @@ class bn_track_stats:
             for m in self.module.modules():
                 if isinstance(m, (torch.nn.BatchNorm2d, torch.nn.BatchNorm1d)):
                     m.track_running_stats = True
+
+
+class ScaledClassifier(MultiTaskModule):
+    def __init__(
+        self,
+        in_features,
+        us_future=False,
+        scale_each_class = True,
+    ):
+        super().__init__()
+
+        self.in_features = in_features
+        self.classifiers = torch.nn.ModuleDict()
+        self.past_scaling_heads = torch.nn.ModuleDict()
+
+        self.classes_seen_so_far = []
+
+        self._stop = nn.Parameter(torch.randn(1))
+        self.scale_each_class = scale_each_class
+
+    def adaptation(self, experience: CLExperience):
+        super().adaptation(experience)
+        device = self._adaptation_device
+        curr_classes = experience.classes_in_this_experience
+        task_labels = experience.task_labels
+        # if isinstance(task_labels, ConstantSequence):
+        #     # task label is unique. Don't check duplicates.
+        #     task_labels = [task_labels[0]]
+
+        if (curr_classes not in self.classes_seen_so_far
+                or len(self.classifiers) == 0):
+            self.classes_seen_so_far.append(curr_classes)
+
+            # for tid in set(task_labels):
+            tid = str(len(self.classifiers))
+            # head adaptation
+            if tid not in self.classifiers:  # create new head
+                past_classifiers = len(self.classifiers)
+                new_head = nn.Linear(self.in_features, len(curr_classes)).to(device)
+                self.classifiers[tid] = new_head
+
+                if past_classifiers > 0:
+                    scalers = nn.ModuleList([nn.Linear(self.in_features, len(c) if self.scale_each_class else 1)
+                                             for c in self.classes_seen_so_far])
+                    self.past_scaling_heads[tid] = scalers
+
+    def forward(self, x, task_labels=None):
+        logits = [c(x) for c in self.classifiers.values()]
+        if len(logits) == 1:
+            return logits
+
+        scalers = [[torch.sigmoid(s(x) + 10) for s in v]
+                   for v in self.past_scaling_heads.values()]
+
+        for i, (l, sig) in enumerate(zip(logits[1:], scalers)):
+            for j, s in enumerate(sig):
+                logits[j] = logits[j] * s
+
+        return logits
