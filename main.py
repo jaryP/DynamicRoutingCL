@@ -226,7 +226,7 @@ def avalanche_training(cfg: DictConfig):
 
                 initial_out_features = cfg.head.get('initial_out_features', None)
                 if plugin_name == 'der':
-                    assert initial_out_features is None, (
+                    assert initial_out_features is not None, (
                         'When using DER you must specify '
                         'the head dimension of the model, '
                         'by setting head_classes parameter'
