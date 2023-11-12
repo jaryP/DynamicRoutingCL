@@ -232,8 +232,6 @@ def avalanche_training(cfg: DictConfig):
                         'by setting head_classes parameter'
                         'in the config file.')
 
-                    del cfg.model.head_classes
-
                 head = hydra.utils.instantiate(cfg.head, in_features=size)
 
                 if plugin_name == 'margin':
