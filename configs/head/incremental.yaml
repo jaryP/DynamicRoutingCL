@@ -1,2 +1,2 @@
 _target_: avalanche.models.IncrementalClassifier
-masking: Yes
+masking: No

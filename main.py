@@ -239,10 +239,10 @@ def avalanche_training(cfg: DictConfig):
                 elif plugin_name == 'icarl':
                     assert isinstance(head, IncrementalClassifier)
 
-                if plugin_name == 'margin':
-                    model = PytorchCombinedModel(backbone, head)
-                else:
-                    model = AvalanceCombinedModel(backbone, head)
+                # if plugin_name == 'margin':
+                model = PytorchCombinedModel(backbone, head)
+                # else:
+                #     model = AvalanceCombinedModel(backbone, head)
 
             # model = get_cl_model(backbone=backbone,
             #                      model_name='',
