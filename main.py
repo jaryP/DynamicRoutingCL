@@ -224,13 +224,13 @@ def avalanche_training(cfg: DictConfig):
 
                 size = np.prod(o.shape)
 
-                initial_out_features = cfg.head.get('initial_out_features', None)
-                if plugin_name == 'der':
-                    assert initial_out_features is not None, (
-                        'When using DER you must specify '
-                        'the head dimension of the model, '
-                        'by setting head_classes parameter'
-                        'in the config file.')
+                # initial_out_features = cfg.head.get('initial_out_features', None)
+                # if plugin_name == 'der':
+                #     assert initial_out_features is not None, (
+                #         'When using DER you must specify '
+                #         'the head dimension of the model, '
+                #         'by setting head_classes parameter'
+                #         'in the config file.')
 
                 head = hydra.utils.instantiate(cfg.head, in_features=size)
 
@@ -238,11 +238,13 @@ def avalanche_training(cfg: DictConfig):
                     assert isinstance(head, ScaledClassifier)
                 elif plugin_name == 'icarl':
                     assert isinstance(head, IncrementalClassifier)
+                elif plugin_name == 'der':
+                    assert isinstance(head, torch.nn.Linear)
 
-                # if plugin_name == 'margin':
-                model = PytorchCombinedModel(backbone, head)
-                # else:
-                #     model = AvalanceCombinedModel(backbone, head)
+                if plugin_name in ['margin', 'der']:
+                    model = PytorchCombinedModel(backbone, head)
+                else:
+                    model = AvalanceCombinedModel(backbone, head)
 
             # model = get_cl_model(backbone=backbone,
             #                      model_name='',
