@@ -20,7 +20,7 @@ der)
 ewc)
   for lambda in 1 10 100 1000
   do
-    python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=ewc_default optimizer=adam  device="$DEVICE" method.ewc_lambda=$lambda experiment=dev hydra=search head=margin_head
+    python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=ewc_default optimizer=adam  device="$DEVICE" method.ewc_lambda=$lambda experiment=dev hydra=search
   done
 ;;
 oewc)
@@ -60,7 +60,7 @@ margin)
           do
           for alpha in 0
           do
-            python main.py +scenario=cil_cifar10_5 model=$MODEL +training=cifar10_5 +method=margin_cifar10 device=$DEVICE method.mem_size=$MEMORY method.past_task_reg=$past_margin_w method.gamma=$gamma +method.alpha=$alpha hydra=search +wadnb_tags=[grid_search] experiment=dev
+            python main.py +scenario=cil_cifar10_5 model=$MODEL +training=cifar10_5 +method=margin_cifar10 device=$DEVICE method.mem_size=$MEMORY method.past_task_reg=$past_margin_w method.gamma=$gamma +method.alpha=$alpha hydra=search +wadnb_tags=[grid_search] experiment=dev head=margin_head
           done
           done
       done
