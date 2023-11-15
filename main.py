@@ -89,6 +89,10 @@ def avalanche_training(cfg: DictConfig):
     task_incremental_learning = scenario['return_task_id']
     permuted_dataset = scenario.get('permuted_dataset', False)
 
+    scenario_name = dataset
+    if scenario.get('permuted_dataset', False):
+        scenario_name = 'rp_' + scenario_name
+
     shuffle = scenario['shuffle']
     shuffle_first = scenario.get('shuffle_first', True)
 
@@ -135,16 +139,6 @@ def avalanche_training(cfg: DictConfig):
 
     force_sit = True if plugin_name == 'der' else False
     force_sit = False
-
-    # head_classes = cfg.model.get('head_classes', None)
-    # if plugin_name == 'der':
-    #     assert head_classes is not None, (
-    #         'When using DER you must specify '
-    #         'the head dimension of the model, '
-    #         'by setting head_classes parameter'
-    #         'in the config file.')
-    #
-    #     del cfg.model.head_classes
 
     experiments_results = []
     tasks_split_dict = {}
@@ -261,7 +255,7 @@ def avalanche_training(cfg: DictConfig):
             if cfg.evaluation.get('enable_textlog', True):
                 loggers.append(TextLogger())
 
-            if cfg.evaluation.get('enable_wandb', True):
+            if cfg.get('enable_wandb', True):
                 wandb_group = cfg.get('wandb_group', None)
                 wandb_prefix = cfg.get('wandb_prefix', '')
 
@@ -272,16 +266,14 @@ def avalanche_training(cfg: DictConfig):
 
                 _tags = cfg.get('wadnb_tags', None)
                 if _tags is not None:
-                    print(_tags, type(_tags))
                     if not isinstance(_tags, ListConfig):
                         _tags = [_tags]
-                    print(_tags)
                     tags += _tags
 
                 wandb_name = f'{cfg.scenario.dataset}/{cfg.scenario.n_tasks}_{cfg.trainer_name}_{backbone.__class__.__name__}_{exp_n}'
 
-                if permuted_dataset:
-                    wandb_name = 'RP_' + wandb_name
+                # if permuted_dataset:
+                #     wandb_name = 'RP_' + wandb_name
 
                 if wandb_prefix is not None and wandb_prefix != '':
                     wandb_name = wandb_prefix + wandb_name

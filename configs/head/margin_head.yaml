@@ -1,1 +1,2 @@
 _target_: models.utils.ScaledClassifier
+scale_each_class: Yes

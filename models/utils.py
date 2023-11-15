@@ -212,8 +212,8 @@ class ScaledClassifier(MultiTaskModule):
     def __init__(
         self,
         in_features,
-        us_future=False,
-        scale_each_class = True,
+        future_classes=None,
+        scale_each_class=True,
     ):
         super().__init__()
 
@@ -225,6 +225,12 @@ class ScaledClassifier(MultiTaskModule):
 
         self._stop = nn.Parameter(torch.randn(1))
         self.scale_each_class = scale_each_class
+
+        self.future_classes = future_classes
+        self.future_layers = None
+        if future_classes is not None and future_classes > 0:
+            self.future_layers = torch.nn.ModuleList([nn.Linear(self.in_features, 1)
+                                                      for _ in range(future_classes)])
 
     def adaptation(self, experience: CLExperience):
         super().adaptation(experience)
@@ -244,7 +250,22 @@ class ScaledClassifier(MultiTaskModule):
             # head adaptation
             if tid not in self.classifiers:  # create new head
                 past_classifiers = len(self.classifiers)
+
                 new_head = nn.Linear(self.in_features, len(curr_classes)).to(device)
+
+                if (self.future_layers is not None and
+                        len(self.future_layers) > 0):
+                    w = torch.cat([f.weight for f in self.future_layers], 0)
+                    b = torch.cat([f.bias for f in self.future_layers], 0)
+
+                    w = w[:len(curr_classes)]
+                    b = b[:len(curr_classes)]
+                    new_head.weight[:len(w)] = w
+                    new_head.bias[:len(b)] = b
+
+                    for i in range(len(w)):
+                        self.future_layers[i] = nn.Linear(self.in_features, 1)
+
                 self.classifiers[tid] = new_head
 
                 if past_classifiers > 0:
@@ -254,14 +275,19 @@ class ScaledClassifier(MultiTaskModule):
 
     def forward(self, x, task_labels=None):
         logits = [c(x) for c in self.classifiers.values()]
-        if len(logits) == 1:
-            return logits
 
-        scalers = [[torch.sigmoid(s(x) + 10) for s in v]
-                   for v in self.past_scaling_heads.values()]
+        if len(logits) > 1:
+            scalers = [[torch.sigmoid(s(x) + 10) for s in v]
+                       for v in self.past_scaling_heads.values()]
 
-        for i, (l, sig) in enumerate(zip(logits[1:], scalers)):
-            for j, s in enumerate(sig):
-                logits[j] = logits[j] * s
+            for i, (l, sig) in enumerate(zip(logits[1:], scalers)):
+                for j, s in enumerate(sig):
+                    logits[j] = logits[j] * s
 
-        return logits
+        future = None
+        # with torch.no_grad():
+        if self.future_layers is not None and self.training:
+            future = [f(x) for f in self.future_layers]
+            future = torch.cat(future, -1)
+
+        return logits, future

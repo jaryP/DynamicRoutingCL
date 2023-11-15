@@ -19,3 +19,4 @@ device: cpu
 trainer_name: ${method_path:${method._target_}}
 wandb_prefix: null
 wandb_tags: null
+enable_wandb: Yes

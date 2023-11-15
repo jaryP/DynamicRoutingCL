@@ -1,7 +1,7 @@
 #method:
 _target_: methods.margin.Margin
 mem_size: 200
-past_task_reg: 0.01
+past_task_reg: 0.1
 past_margin: 0.2
 warm_up_epochs: -1
 future_task_reg: 1

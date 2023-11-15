@@ -8,7 +8,6 @@ metrics:
 #loggers:
 #  - _target_: avalanche.logging.text_logging.TextLogger
 #  - _target_: avalanche.logging.WandBLogger
-enable_wandb: Yes
 enable_textlog: Yes
 
 #from avalanche.logging import WandBLogger
