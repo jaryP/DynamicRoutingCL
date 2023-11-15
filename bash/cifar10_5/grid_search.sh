@@ -20,7 +20,7 @@ der)
 ewc)
   for lambda in 1 10 100 1000
   do
-    python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=ewc_default optimizer=adam  device="$DEVICE" method.ewc_lambda=$lambda experiment=dev hydra=search
+    python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=ewc_default optimizer=adam  device="$DEVICE" method.ewc_lambda=$lambda experiment=dev hydra=search head=margin_head
   done
 ;;
 oewc)
