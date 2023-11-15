@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 METHOD=$1
 MODEL=$2
-MEMORY=$2
-DEVICE=$3
+MEMORY=$3
+DEVICE=$4
 
 case $METHOD in
 der)
