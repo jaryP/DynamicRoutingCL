@@ -1,4 +1,3 @@
-#method:
 _target_: methods.margin.Margin
 mem_size: 200
 past_task_reg: 0.1
@@ -7,3 +6,4 @@ warm_up_epochs: -1
 future_task_reg: 1
 future_margin: 5
 gamma: 1
+margin_type: adaptive
