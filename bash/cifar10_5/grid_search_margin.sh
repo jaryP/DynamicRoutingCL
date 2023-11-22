@@ -11,7 +11,7 @@ do
         for alpha in 0
         do
           python main.py +scenario=cil_cifar10_5 model=$MODEL +training=cifar10_5 +method=margin_cifar10 device=$DEVICE method.mem_size=$memory method.past_task_reg=$past_margin_w method.gamma=$gamma +method.alpha=0 hydra=search +wadnb_tags=[grid_search_margin] method.margin_type=adaptive +method.rehearsal_metric='mse' experiment=dev head=margin_head &
-          python main.py +scenario=cil_cifar10_5 model=$MODEL +training=cifar10_5 +method=margin_cifar10 device=$DEVICE method.mem_size=$memory method.past_task_reg=$past_margin_w method.gamma=$gamma +method.alpha=0 hydra=search +wadnb_tags=[grid_search_margin] method.margin_type=adaptive +method.rehearsal_metric='kl' experiment=dev head=margin_head &
+#          python main.py +scenario=cil_cifar10_5 model=$MODEL +training=cifar10_5 +method=margin_cifar10 device=$DEVICE method.mem_size=$memory method.past_task_reg=$past_margin_w method.gamma=$gamma +method.alpha=0 hydra=search +wadnb_tags=[grid_search_margin] method.margin_type=adaptive +method.rehearsal_metric='kl' experiment=dev head=margin_head &
           wait
         done
         done
