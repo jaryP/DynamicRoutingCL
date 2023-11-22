@@ -236,7 +236,7 @@ class Margin(SupervisedTemplate):
 
     def _before_training_epoch(self, **kwargs):
         tid = self.experience.current_experience
-        if tid == 0 or self.margin_type != 'normal':
+        if tid == 0:
             return
 
         with torch.no_grad(), torch.inference_mode():
@@ -260,7 +260,10 @@ class Margin(SupervisedTemplate):
             # logits = torch.cat(logits, 0) / 2
             logits = torch.cat(logits, 0)
 
-            self.margin_distribution = torch.distributions.normal.Normal(logits.mean(), logits.std())
+            if self.margin_type == 'mean':
+                self._margin = 1 - logits.mean()
+            elif self.margin_type != 'normal':
+                self.margin_distribution = torch.distributions.normal.Normal(logits.mean(), logits.std())
 
     def criterion(self):
         tid = self.experience.current_experience
@@ -329,20 +332,24 @@ class Margin(SupervisedTemplate):
                         margin = torch.minimum(margin, torch.full_like(margin, (1 / (distr.shape[-1] - 1))))
                     elif self.margin_type == 'mean':
                         # margin = (1 - mx_current_classes.mean()) * self.past_margin
-                        margin = past_max.mean() * self.past_margin
+                        margin = mx_current_classes.mean() * self.past_margin
+                        margin = torch.minimum(margin,
+                                               torch.full_like(margin, (1 / (distr.shape[-1]))))
                     else:
-                        margin = (1 / (distr.shape[-1] - 1) - 1)
+                        margin = (1 / (distr.shape[-1] - 1))
 
                     margin_dist = torch.relu(
                         past_max - mx_current_classes + margin)
 
                     den_mask = margin_dist > 0
 
-                    if den_mask.sum() > 0:
-                        margin_den += den_mask.sum()
-                        past_reg = margin_dist[den_mask].sum()
+                    margin_loss += margin_dist.mean()
 
-                        margin_loss += past_reg
+                    # if den_mask.sum() > 0:
+                    #     margin_den += den_mask.sum()
+                    #     past_reg = margin_dist[den_mask].sum()
+                    #
+                    #     margin_loss += past_reg
 
                 # if self.future_logits is not None:
                 #     co = torch.cat((co, self.future_logits), -1)
@@ -354,8 +361,10 @@ class Margin(SupervisedTemplate):
 
                 ce_loss += loss
 
-            if margin_den > 0:
-                margin_loss = (margin_loss / margin_den) * self.past_task_reg
+            # if margin_den > 0:
+            #     margin_loss = (margin_loss / margin_den) * self.past_task_reg
+
+            margin_loss = margin_loss * self.past_task_reg
             ce_loss = (ce_loss / ce_den)
 
             loss = ce_loss + margin_loss
