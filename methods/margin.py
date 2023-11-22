@@ -52,7 +52,9 @@ class Margin(SupervisedTemplate):
                  train_epochs: int = 1,
                  alpha: float = 0,
                  past_task_reg=1,
-                 past_margin=0.2,
+                 rehearsal_metric='mse',
+                 margin_type='adaptive',
+                 past_margin=0.5,
                  warm_up_epochs=-1,
                  future_task_reg=1,
                  future_margin=3,
@@ -67,6 +69,11 @@ class Margin(SupervisedTemplate):
                  eval_every=-1,
                  ):
 
+        assert margin_type in ['fixed', 'adaptive', 'normal', 'mean']
+        assert 0 <= past_margin <= 1
+
+        assert rehearsal_metric in ['kl', 'mse']
+
         self.future_margins = []
         self.tasks_nclasses = dict()
         self.current_mb_size = 0
@@ -76,6 +83,7 @@ class Margin(SupervisedTemplate):
 
         self.past_task_reg = past_task_reg
         self.past_margin = past_margin
+        self.margin_type = margin_type
 
         self.future_margin = future_margin
         self.future_task_reg = future_task_reg
@@ -83,7 +91,8 @@ class Margin(SupervisedTemplate):
         self.alpha = alpha
         # Past task logits weight
         self.gamma = gamma
-        self.logit_regularization = 'kl'
+
+        self.logit_regularization = rehearsal_metric
         self.tau = 1
 
         self.memory_size = mem_size
@@ -225,299 +234,33 @@ class Margin(SupervisedTemplate):
         # self.future_margin = self.future_margin + self.past_margin * 2
         # self.future_margins.append(self.future_margin)
 
-    def get_gradients(self):
+    def _before_training_epoch(self, **kwargs):
         tid = self.experience.current_experience
+        if tid == 0 or self.margin_type != 'normal':
+            return
 
-        if tid == 1:
-            mask = self.mb_task_id == tid
+        with torch.no_grad(), torch.inference_mode():
+            logits = []
 
-            co = torch.cat(self.mb_output[tid:], -1)[mask]
-            past = torch.cat(self.mb_output[:tid], -1)[mask]
-            y = self.mb_y[mask]
+            for x, y, t in self.dataloader:
+                x, y = x.to(self.device), y.to(self.device)
 
-            distr = torch.cat(self.mb_output, -1)[mask]
-            p = torch.softmax(distr, -1)
-            print('Distribution', distr.mean(0), p.mean(0))
-            mx_current_classes = p[range(len(p)), y]
-            past_max = p[:, :past.shape[-1]].max(-1).values
-            margin_dist = torch.relu(past_max - mx_current_classes + 0.33)
-            den_mask = margin_dist > 0
-            past_reg = margin_dist[den_mask].sum()
-            p_margin_grads = torch.autograd.grad(past_reg, distr,
-                                                 allow_unused=True,
-                                                 retain_graph=False,
-                                                 create_graph=True)[0]
+                preds, _ = self.model(x)
+                past = torch.cat(preds, -1)
 
-            distr = torch.cat(self.mb_output, -1)[mask]
-            mx_current_classes = distr[range(len(distr)), y]
-            past_max = distr[:, :past.shape[-1]].max(-1).values
-            margin_dist = torch.relu(past_max - mx_current_classes + 2)
-            den_mask = margin_dist > 0
-            past_reg = margin_dist[den_mask].sum()
-            l_margin_grads = torch.autograd.grad(past_reg, distr,
-                                                 allow_unused=True,
-                                                 retain_graph=False,
-                                                 create_graph=True)[0]
+                preds = torch.cat(preds, -1)
+                preds = torch.softmax(preds, -1)
 
-            distr = torch.cat(self.mb_output, -1)[mask]
-            mx_current_classes = distr[range(len(distr)), y]
-            past_max = distr[:, :past.shape[-1]].max(-1).values
-            margin_dist = torch.relu(past_max - mx_current_classes + 1)
-            den_mask = margin_dist > 0
-            past_reg = margin_dist[den_mask].sum()
-            l_margin_grads1 = torch.autograd.grad(past_reg, distr,
-                                                  allow_unused=True,
-                                                  retain_graph=False,
-                                                  create_graph=True)[0]
+                # cl = preds[:, :past.shape[-1]].max(-1).values
 
-            print('P margin .33', p_margin_grads.mean(0), p_margin_grads.std(0))
-            print('L margin 2', l_margin_grads.mean(0), l_margin_grads.std(0))
-            print('L margin 1', l_margin_grads1.mean(0), l_margin_grads1.std(0))
+                cl = preds[range(len(preds)), y]
 
-            ce_loss = nn.functional.cross_entropy(distr, y)
+                logits.append(cl)
 
-            self.model.zero_grad()
-            ce_grads = torch.autograd.grad(ce_loss, distr,
-                                           retain_graph=False,
-                                           create_graph=True)[0]
+            # logits = torch.cat(logits, 0) / 2
+            logits = torch.cat(logits, 0)
 
-            print(ce_grads.mean(0))
-
-        if not self.is_training:
-            loss_val = nn.functional.cross_entropy(self.mb_output,
-                                                   self.mb_y)
-
-            return loss_val
-
-        if len(self.past_dataset) == 0:
-            pred = torch.cat(self.mb_output, -1)
-            # if self.future_logits is not None:
-            #     pred = torch.cat((pred, self.future_logits), -1)
-            loss = nn.functional.cross_entropy(pred, self.mb_y,
-                                               label_smoothing=0)
-        else:
-            ce_loss = 0
-            margin_loss = 0
-            margin_den = 0
-            ce_den = 0
-
-            bs = len(self.mb_x)
-
-            for t in torch.unique(self.mb_task_id):
-                if t < tid and self.alpha <= 0:
-                    continue
-                    # loss = loss * self.alpha
-
-                mask = self.mb_task_id == t
-                ce_den += mask.sum().item()
-
-                y = self.mb_y[mask]
-                co = torch.cat(self.mb_output[t.item():], -1)[mask]
-
-                if t > 0:
-                    past = torch.cat(self.mb_output[:t.item()], -1)[mask]
-
-                    distr = torch.cat((past, co), -1)
-                    distr = torch.softmax(distr, -1)
-
-                    mx_current_classes = distr[range(len(co)), y]
-                    past_max = distr[:, :past.shape[-1]].max(-1).values
-
-                    y = y - past.shape[-1]
-
-                    # past_max = past.max(-1).values.detach()
-                    # past_max = past.max(-1).values
-                    #
-                    # mx_current_classes = co[range(len(co)), y]
-
-                    # margin_dist = torch.relu(past_max - mx_current_classes + self.past_margin)
-                    # margin_dist = torch.relu(past_max - mx_current_classes + (1 / (distr.shape[-1] - 1)))
-                    margin = mx_current_classes.mean() / 2
-                    margin_dist = torch.relu(
-                        past_max - mx_current_classes + margin)
-
-                    den_mask = margin_dist > 0
-                    margin_den += den_mask.sum().item()
-
-                    past_reg = margin_dist[den_mask].sum()
-
-                    # grad = torch.autograd.grad(past_reg, past,
-                    #                            retain_graph=False,
-                    #                            create_graph=False)[0]
-
-                    margin_loss += past_reg
-
-                # if self.future_logits is not None:
-                #     co = torch.cat((co, self.future_logits), -1)
-
-                loss = nn.functional.cross_entropy(co, y, reduction='sum')
-
-                if t < tid:
-                    loss = loss * self.alpha
-
-                ce_loss += loss
-
-            margin_loss = (margin_loss / margin_den) * self.past_task_reg
-            ce_loss = (ce_loss / ce_den)
-
-            loss = ce_loss + margin_loss
-
-            if self.gamma > 0:
-                factor = 1
-                # if self.scheduled_factor:
-                #     current_classes = len(
-                #         self.experience.classes_in_this_experience)
-                #     seen_classes = len(self.experience.classes_seen_so_far)
-                #
-                #     factor = (seen_classes / current_classes) ** 0.5
-                # else:
-                #     factor = 1
-
-                if self.past_model is not None:
-                    bs = len(self.mb_output) // 2
-
-                    x, y, tids = self.mbatch
-                    # if self.double_sampling > 0:
-                    # x, y, tid = self.sample_past_batch(self.double_sampling)
-                    # x, y = x.to(self.device), y.to(self.device)
-                    # curr_logits = self.model(x)[0]
-
-                    curr_logits = self.mb_output
-
-                    # curr_logits = torch.cat((curr_logits, random_logits), -1)
-                    # else:
-                    #     x, y = (self.mb_x[self.current_mb_size:],
-                    #             self.mb_y[self.current_mb_size:])
-                    #     # curr_logits = self.mb_output[ self.current_mb_size:]
-                    #     curr_features = self.mb_features[self.current_mb_size:]
-                    #
-                    #     curr_logits = pred[self.current_mb_size:]
-                    #     # curr_features = self.mb_features[ self.current_mb_size:]
-
-                    with torch.no_grad():
-                        # past_logits, past_features, future_logits, _ = self.past_model(x, other_paths=self.model.current_random_paths)
-                        past_logits, _ = self.past_model(x)
-                        # curr_logits = curr_logits[:, :past_logits.shape[1]]
-                    # if not self.double_sampling > 0:
-                    #     curr_logits = curr_logits[:, :past_logits.shape[-1]]
-
-                    past_reg_loss = 0
-
-                    if self.alpha <= 0:
-                        mask = tids != tid
-
-                        co = torch.cat(curr_logits, -1)[mask]
-                        po = torch.cat(past_logits, -1)[mask]
-                        # past_reg_loss = nn.functional.mse_loss(co, po, reduction='mean')
-                        past_reg_loss = nn.functional.kl_div(
-                            torch.log_softmax(co, -1),
-                            torch.softmax(po, -1),
-                            reduction='batchmean')
-                        # a = 1 / mask.sum()
-                        #
-                        # for pl, cl in zip(past_logits, curr_logits):
-                        #     pl = pl[mask]
-                        #     cl = cl[mask]
-                        #
-                        #     # cl = nn.functional.normalize(cl, 2, -1)
-                        #     # pl = nn.functional.normalize(pl, 2, -1)
-                        #     # lr = nn.functional.kl_div(torch.log_softmax(cl, -1),
-                        #     #                           torch.softmax(pl, -1),
-                        #     #                           reduction='batchmean')
-                        #     lr = nn.functional.mse_loss(cl, pl, reduction='mean')
-                        # past_reg_loss += lr
-                    else:
-                        for t in torch.unique(tids):
-                            if t == tid:
-                                continue
-
-                            mask = tids == t
-
-                            _y = y[mask]
-                            co = torch.cat(curr_logits[t.item():], -1)[mask]
-                            po = torch.cat(past_logits[t.item():], -1)[mask]
-
-                            lr = nn.functional.mse_loss(co, po, reduction='sum')
-                            # lr = nn.functional.kl_div(torch.log_softmax(co, -1),
-                            #                           torch.softmax(po, -1), reduction='sum')
-                            past_reg_loss += lr
-
-                        past_reg_loss = past_reg_loss / (len(x) / 2)
-
-                    loss = loss + past_reg_loss * self.gamma * factor
-
-                    # if self.gamma > 0:
-                    #     if self.logit_regularization == 'kl':
-                    #         curr_logits = torch.log_softmax(
-                    #             curr_logits / self.tau, -1)
-                    #         past_logits = torch.log_softmax(
-                    #             past_logits / self.tau, -1)
-                    #
-                    #         lr = nn.functional.kl_div(curr_logits, past_logits,
-                    #                                   log_target=True,
-                    #                                   reduction='batchmean')
-                    #     elif self.logit_regularization == 'mse':
-                    #         classes = len(self.past_dataset)
-                    #         # lr = nn.functional.mse_loss(curr_logits[:, classes:],
-                    #         #                             past_logits[:, classes:])
-                    #
-                    #         lr = nn.functional.mse_loss(curr_logits,
-                    #                                     past_logits)
-                    #     elif self.logit_regularization == 'cosine':
-                    #         lr = 1 - nn.functional.cosine_similarity(
-                    #             curr_logits, past_logits, -1)
-                    #         lr = lr.mean()
-                    #     else:
-                    #         assert False
-                    #
-                    #     loss += lr * self.gamma * factor
-
-                    # if self.delta > 0:
-                    #     classes = len(
-                    #         self.experience.classes_in_this_experience)
-                    #
-                    #     a = curr_features
-                    #     b = past_features
-                    #
-                    #     dist = nn.functional.mse_loss(a, b)
-                    #     # dist = 1 - nn.functional.cosine_similarity(a, b, -1)
-                    #     dist = dist.mean()
-                    #
-                    #     loss += dist * self.delta * factor
-
-        future_reg = 0
-        if self.future_task_reg > 0 and self.future_margin > 0 and self.future_logits is not None:
-            future_logits = self.future_logits
-            # future_mx = future_logits.max(-1).values
-            # mn = future_logits.min()
-            # if mn < 0:
-            #     future_logits = future_logits - mn
-            future_mx = future_logits.min(-1).values.detach()
-            current_mx = torch.cat(self.mb_output, -1).max(-1).values
-
-            # margins = torch.tensor(self.future_margins, device=self.device)
-            # reg = current_mx - future_mx - margins[self.mb_task_id]
-
-            margin = self.future_margin
-            # margin = torch.where(current_mx > 0,
-            #                      - future_mx - margin,
-            #                      + future_mx - margin)
-
-            reg = current_mx - future_mx - margin
-            logits_pos_reg = - current_mx + future_mx
-
-            reg = reg + logits_pos_reg
-            # reg = current_mx - future_mx - self.future_margin
-            reg = torch.relu(reg)
-            mask = reg > 0
-            if any(mask):
-                future_reg = reg[mask].mean()
-
-            future_reg = future_reg * self.future_task_reg
-
-            loss += future_reg
-
-        return loss
+            self.margin_distribution = torch.distributions.normal.Normal(logits.mean(), logits.std())
 
     def criterion(self):
         tid = self.experience.current_experience
@@ -568,23 +311,38 @@ class Margin(SupervisedTemplate):
 
                     y = y - past.shape[-1]
 
-                    # past_max = past.max(-1).values.detach()
-                    # past_max = past.max(-1).values
-                    #
-                    # mx_current_classes = co[range(len(co)), y]
+                    w = 1
+                    # if 10 > 0 and self.clock.train_exp_epochs / 10 >= 1:
+                        # past_max = past.max(-1).values.detach()
+                        # past_max = past.max(-1).values
+                        #
+                        # mx_current_classes = co[range(len(co)), y]
+                        # margin_dist = torch.relu(past_max - mx_current_classes + self.past_margin)
+                        # margin = (1 / (distr.shape[-1] - 1))
 
-                    # margin_dist = torch.relu(past_max - mx_current_classes + self.past_margin)
-                    # margin = (1 / (distr.shape[-1] - 1))
+                    if self.margin_type == 'fixed':
+                        margin = self.past_margin
+                    elif self.margin_type == 'normal':
+                        margin = self.margin_distribution.rsample([len(distr)])
+                        margin = torch.clip(margin, 0, 1)
+                        margin = margin * self.past_margin
+                        margin = torch.minimum(margin, torch.full_like(margin, (1 / (distr.shape[-1] - 1))))
+                    elif self.margin_type == 'mean':
+                        # margin = (1 - mx_current_classes.mean()) * self.past_margin
+                        margin = past_max.mean() * self.past_margin
+                    else:
+                        margin = (1 / (distr.shape[-1] - 1) - 1)
 
-                    margin = mx_current_classes.mean() / 4
-                    margin_dist = torch.relu(past_max - mx_current_classes + margin)
+                    margin_dist = torch.relu(
+                        past_max - mx_current_classes + margin)
 
                     den_mask = margin_dist > 0
-                    margin_den += den_mask.sum().item()
 
-                    past_reg = margin_dist[den_mask].sum()
+                    if den_mask.sum() > 0:
+                        margin_den += den_mask.sum()
+                        past_reg = margin_dist[den_mask].sum()
 
-                    margin_loss += past_reg
+                        margin_loss += past_reg
 
                 # if self.future_logits is not None:
                 #     co = torch.cat((co, self.future_logits), -1)
@@ -596,7 +354,8 @@ class Margin(SupervisedTemplate):
 
                 ce_loss += loss
 
-            margin_loss = (margin_loss / margin_den) * self.past_task_reg
+            if margin_den > 0:
+                margin_loss = (margin_loss / margin_den) * self.past_task_reg
             ce_loss = (ce_loss / ce_den)
 
             loss = ce_loss + margin_loss
@@ -616,61 +375,24 @@ class Margin(SupervisedTemplate):
                     bs = len(self.mb_output) // 2
 
                     x, y, tids = self.mbatch
-                    # if self.double_sampling > 0:
-                    # x, y, tid = self.sample_past_batch(self.double_sampling)
-                    # x, y = x.to(self.device), y.to(self.device)
-                    # curr_logits = self.model(x)[0]
-
                     curr_logits = self.mb_output
 
-                    # curr_logits = torch.cat((curr_logits, random_logits), -1)
-                    # else:
-                    #     x, y = (self.mb_x[self.current_mb_size:],
-                    #             self.mb_y[self.current_mb_size:])
-                    #     # curr_logits = self.mb_output[ self.current_mb_size:]
-                    #     curr_features = self.mb_features[self.current_mb_size:]
-                    #
-                    #     curr_logits = pred[self.current_mb_size:]
-                    #     # curr_features = self.mb_features[ self.current_mb_size:]
-
                     with torch.no_grad():
-                        # past_logits, past_features, future_logits, _ = self.past_model(x, other_paths=self.model.current_random_paths)
                         past_logits, _ = self.past_model(x)
-                        # curr_logits = curr_logits[:, :past_logits.shape[1]]
-                    # if not self.double_sampling > 0:
-                    #     curr_logits = curr_logits[:, :past_logits.shape[-1]]
 
-                    past_reg_loss = 0
-
-                    # if self.alpha <= 0:
                     mask = tids != tid
 
                     co = torch.cat(curr_logits, -1)[mask]
                     po = torch.cat(past_logits, -1)[mask]
 
-                    # past_reg_loss = nn.functional.mse_loss(co, po, reduction='mean')
-                    past_reg_loss = nn.functional.kl_div(
-                        torch.log_softmax(co, -1),
-                        torch.softmax(po, -1),
-                        reduction='batchmean')
-
-                    # else:
-                    #     for t in torch.unique(tids):
-                    #         if t == tid:
-                    #             continue
-                    #
-                    #         mask = tids == t
-                    #
-                    #         _y = y[mask]
-                    #         co = torch.cat(curr_logits[t.item():], -1)[mask]
-                    #         po = torch.cat(past_logits[t.item():], -1)[mask]
-                    #
-                    #         lr = nn.functional.mse_loss(co, po, reduction='sum')
-                    #         # lr = nn.functional.kl_div(torch.log_softmax(co, -1),
-                    #         #                           torch.softmax(po, -1), reduction='sum')
-                    #         past_reg_loss += lr
-                    #
-                    #     past_reg_loss = past_reg_loss / (len(x) / 2)
+                    if self.logit_regularization == 'mse':
+                        past_reg_loss = nn.functional.mse_loss(co, po,
+                                                               reduction='mean')
+                    else:
+                        past_reg_loss = nn.functional.kl_div(
+                            torch.log_softmax(co, -1),
+                            torch.softmax(po, -1),
+                            reduction='batchmean')
 
                     loss = loss + past_reg_loss * self.gamma * factor
 
@@ -680,7 +402,6 @@ class Margin(SupervisedTemplate):
 
             future_mx = future_logits.min(-1).values.detach()
             current_mx = torch.cat(self.mb_output, -1).max(-1).values
-
 
             margin = self.future_margin
 

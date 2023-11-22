@@ -35,6 +35,14 @@ replay)
   python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=replay_1000   device="$DEVICE"
   python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=replay_2000   device="$DEVICE"
 ;;
+margin)
+#  python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=margin_cifar10 method.mem_size=200 head=margin_head method.gamma=1 +method.alpha=0 method.past_task_reg=0.05  device="$DEVICE" optimizer.momentum=0.9
+  python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=margin_cifar10 method.mem_size=200 head=margin_head method.gamma=1 +method.alpha=0 method.past_task_reg=0.05 +method.rehearsal_metric='mse'  device="$DEVICE" +wadnb_tags=[final_results]
+  python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=margin_cifar10 method.mem_size=500 head=margin_head method.gamma=1 +method.alpha=0 method.past_task_reg=0.05 +method.rehearsal_metric='mse'  device="$DEVICE" +wadnb_tags=[final_results]
+#  python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=er_ace_default method.mem_size=500   device="$DEVICE"
+#  python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=er_ace_default method.mem_size=1000   device="$DEVICE"
+#  python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=er_ace_default method.mem_size=2000   device="$DEVICE"
+;;
 ssil)
   python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=ssil_200   device="$DEVICE" training.epochs=100
   python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=ssil_500   device="$DEVICE" training.epochs=100

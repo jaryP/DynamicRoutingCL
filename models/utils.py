@@ -214,17 +214,22 @@ class ScaledClassifier(MultiTaskModule):
         in_features,
         future_classes=None,
         scale_each_class=True,
+        reset_scalers=False,
+        c=10, z=0.5,
     ):
         super().__init__()
 
         self.in_features = in_features
         self.classifiers = torch.nn.ModuleDict()
         self.past_scaling_heads = torch.nn.ModuleDict()
+        self.c = c
+        self.z = z
 
         self.classes_seen_so_far = []
 
         self._stop = nn.Parameter(torch.randn(1))
         self.scale_each_class = scale_each_class
+        self.reset_scalers = reset_scalers
 
         self.future_classes = future_classes
         self.future_layers = None
@@ -240,6 +245,11 @@ class ScaledClassifier(MultiTaskModule):
         # if isinstance(task_labels, ConstantSequence):
         #     # task label is unique. Don't check duplicates.
         #     task_labels = [task_labels[0]]
+
+        if len(self.past_scaling_heads) > 0 and self.reset_scalers:
+            for p in self.past_scaling_heads.parameters():
+                if hasattr(p, 'reset_parameters'):
+                    p.reset_parameters()
 
         if (curr_classes not in self.classes_seen_so_far
                 or len(self.classifiers) == 0):
@@ -277,7 +287,7 @@ class ScaledClassifier(MultiTaskModule):
         logits = [c(x) for c in self.classifiers.values()]
 
         if len(logits) > 1:
-            scalers = [[torch.sigmoid(s(x) + 10) for s in v]
+            scalers = [[torch.sigmoid(self.z * s(x) + self.c) for s in v]
                        for v in self.past_scaling_heads.values()]
 
             for i, (l, sig) in enumerate(zip(logits[1:], scalers)):

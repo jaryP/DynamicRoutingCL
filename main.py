@@ -22,6 +22,7 @@ from torch.utils.data import DataLoader
 
 import methods.routing
 from base.scenario import get_dataset_nc_scenario
+from methods.debug_plugins import GradientsDebugPlugin, LogitsDebugPlugin
 from models.base import get_cl_model
 from models.utils import AvalanceCombinedModel, ScaledClassifier, \
     PytorchCombinedModel
@@ -202,6 +203,8 @@ def avalanche_training(cfg: DictConfig):
                 with open(results_path, 'r') as json_file:
                     last_results = json.load(json_file)
                     experiments_results.append(last_results)
+
+                    log.info(last_results[-1])
             else:
                 train_res = results_after_each_task
         else:
@@ -303,6 +306,13 @@ def avalanche_training(cfg: DictConfig):
 
             method_name = hydra.utils.get_class(cfg.method._target_).__name__.lower()
 
+            debug_plugins = []
+            if cfg.get('debug_path', None) is not None:
+                if plugin_name =='replay':
+                    debug_plugins = [LogitsDebugPlugin(cfg.debug_path)]
+                if plugin_name =='der':
+                    debug_plugins = [GradientsDebugPlugin(cfg.debug_path)]
+
             if cfg is not None and '_target_' in cfg.method:
                 if plugin_name == 'icarl':
                     strategy = hydra.utils.instantiate(cfg.method,
@@ -335,6 +345,7 @@ def avalanche_training(cfg: DictConfig):
                                                            train_mb_size=batch_size,
                                                            evaluator=eval_plugin,
                                                            device=device,
+                                                           plugins=debug_plugins,
                                                            eval_every=eval_every)
             else:
                 assert False, f'Method not implemented yet {cfg}'

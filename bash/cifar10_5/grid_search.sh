@@ -52,19 +52,19 @@ oewc)
 #    done
 #;;
 margin)
-#  for memory in 200 500 1000 2000
-#  do
-    for past_margin_w in 1 0.5 0.1 0.01 0.01
+  for memory in 200 500 1000 2000
+  do
+    for past_margin_w in 0.5 0.1 0.01 0.05
     do
-          for gamma in 0.1 0.5 1 2 3 5
+          for gamma in 0.5 1 2
           do
           for alpha in 0
           do
-            python main.py +scenario=cil_cifar10_5 model=$MODEL +training=cifar10_5 +method=margin_cifar10 device=$DEVICE method.mem_size=$MEMORY method.past_task_reg=$past_margin_w method.gamma=$gamma +method.alpha=$alpha hydra=search +wadnb_tags=[grid_search] experiment=dev head=margin_head
+            python main.py +scenario=cil_cifar10_5 model=$MODEL +training=cifar10_5 +method=margin_cifar10 device=$DEVICE method.mem_size=$memory method.past_task_reg=$past_margin_w method.gamma=$gamma +method.alpha=$alpha hydra=search +wadnb_tags=[grid_search] experiment=dev head=margin_head wandb_prefix=lenovo_
           done
           done
       done
-#    done
+    done
 ;;
 
 #routing)
