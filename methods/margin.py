@@ -331,10 +331,10 @@ class Margin(SupervisedTemplate):
                         margin = margin * self.past_margin
                         margin = torch.minimum(margin, torch.full_like(margin, (1 / (distr.shape[-1] - 1))))
                     elif self.margin_type == 'mean':
-                        # margin = (1 - mx_current_classes.mean()) * self.past_margin
-                        margin = mx_current_classes.mean() * self.past_margin
-                        margin = torch.minimum(margin,
-                                               torch.full_like(margin, (1 / (distr.shape[-1]))))
+                        margin = (1 - mx_current_classes.mean()) * self.past_margin
+                        # margin = mx_current_classes.mean() * self.past_margin
+                        # margin = torch.minimum(margin,
+                        #                        torch.full_like(margin, (1 / (distr.shape[-1]))))
                     else:
                         margin = (1 / (distr.shape[-1] - 1))
 
