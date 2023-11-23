@@ -42,10 +42,10 @@ ssil)
   python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=ssil_2000 optimizer=adam  device="$DEVICE" training.epochs=100
 ;;
 er_ece)
-  python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=er_ece_default method.mem_size=200 optimizer=adam  device="$DEVICE"
-  python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=er_ece_default method.mem_size=500 optimizer=adam  device="$DEVICE"
-  python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=er_ece_default method.mem_size=1000 optimizer=adam  device="$DEVICE"
-  python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=er_ece_default method.mem_size=2000 optimizer=adam  device="$DEVICE"
+  python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=er_ace_default method.mem_size=200 optimizer=adam  device="$DEVICE"
+  python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=er_ace_default method.mem_size=500 optimizer=adam  device="$DEVICE"
+  python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=er_ace_default method.mem_size=1000 optimizer=adam  device="$DEVICE"
+  python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=er_ace_default method.mem_size=2000 optimizer=adam  device="$DEVICE"
 ;;
 gdumb)
   python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=gdumb method.mem_size=200 optimizer=adam  device="$DEVICE"
