@@ -1,3 +1,4 @@
 _target_: avalanche.training.ICaRL
 memory_size: null
 fixed_memory: True
+buffer_transform: null
