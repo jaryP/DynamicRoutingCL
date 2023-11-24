@@ -26,9 +26,12 @@ naive)
 cumulative)
   python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=cumulative   device="$DEVICE"
 ;;
-#icarl)
-#  python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=icarl_2000   device="$DEVICE"
-#;;
+icarl)
+  python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=icarl method.memory_size=200  device="$DEVICE"
+  python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=icarl method.memory_size=500 device="$DEVICE"
+  python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=icarl method.memory_size=1000  device="$DEVICE"
+  python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=icarl method.memory_size=2000  device="$DEVICE"
+;;
 replay)
   python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=replay_200   device="$DEVICE"
   python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=replay_500   device="$DEVICE"
