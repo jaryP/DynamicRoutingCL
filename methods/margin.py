@@ -84,6 +84,7 @@ class Margin(SupervisedTemplate):
         self.past_task_reg = past_task_reg
         self.past_margin = past_margin
         self.margin_type = margin_type
+        self.warm_up_epochs = warm_up_epochs
 
         self.future_margin = future_margin
         self.future_task_reg = future_task_reg
@@ -314,7 +315,6 @@ class Margin(SupervisedTemplate):
 
                     y = y - past.shape[-1]
 
-                    w = 1
                     # if 10 > 0 and self.clock.train_exp_epochs / 10 >= 1:
                         # past_max = past.max(-1).values.detach()
                         # past_max = past.max(-1).values
@@ -364,7 +364,11 @@ class Margin(SupervisedTemplate):
             # if margin_den > 0:
             #     margin_loss = (margin_loss / margin_den) * self.past_task_reg
 
-            margin_loss = margin_loss * self.past_task_reg
+            w = 1
+            if self.warm_up_epochs > 0:
+                w = min(1, self.clock.train_exp_epochs / self.warm_up_epochs)
+
+            margin_loss = margin_loss * self.past_task_reg * w
             ce_loss = (ce_loss / ce_den)
 
             loss = ce_loss + margin_loss
