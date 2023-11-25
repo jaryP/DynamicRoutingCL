@@ -473,8 +473,8 @@ def avalanche_training(cfg: DictConfig):
         for k, v in r[-1].items():
             mean_res[k].append(v)
 
-    averaged_results = {k: {'mean': np.mean(v),
-                            'std': np.std(v)} for k, v in mean_res.items()}
+    averaged_results = {k: {'mean': np.mean(v) * 100,
+                            'std': np.std(v) * 100} for k, v in mean_res.items()}
 
     for k, d in averaged_results.items():
         log.info(f'Metric {k}: mean: {d["mean"]:.2f}, std: {d["std"]:.2f}')
