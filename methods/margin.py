@@ -366,7 +366,7 @@ class Margin(SupervisedTemplate):
 
             w = 1
             if self.warm_up_epochs > 0:
-                w = min(1, self.clock.train_exp_epochs / self.warm_up_epochs)
+                w = min(1, (self.clock.train_exp_epochs / self.warm_up_epochs) ** 2)
 
             margin_loss = margin_loss * self.past_task_reg * w
             ce_loss = (ce_loss / ce_den)
