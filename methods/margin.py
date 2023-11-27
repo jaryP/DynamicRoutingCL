@@ -101,6 +101,8 @@ class Margin(SupervisedTemplate):
 
         self.memory_size = mem_size
 
+        self.use_logits = True
+
         if batch_size_mem is None:
             self.batch_size_mem = train_mb_size
         else:
@@ -133,7 +135,10 @@ class Margin(SupervisedTemplate):
         super()._after_training_iteration(**kwargs)
 
     def _after_training_exp(self, **kwargs):
-        self._after_training_exp_f(**kwargs)
+        if self.use_logits:
+            self._after_training_exp_logits()
+        else:
+            self._after_training_exp_f(**kwargs)
 
         super()._after_training_exp(**kwargs)
 
@@ -155,6 +160,7 @@ class Margin(SupervisedTemplate):
             to_add = -1
 
         x, y, t = [], [], []
+        ls = []
 
         for c in classes:
             d = self.past_dataset[c]
@@ -164,16 +170,24 @@ class Margin(SupervisedTemplate):
             else:
                 bs = samples_per_task
 
-            ot_x, ot_y, ot_tid = next(iter(DataLoader(d,
+            batch = next(iter(DataLoader(d,
                                                       batch_size=bs,
                                                       shuffle=True)))
+
+            if len(batch) == 3:
+                ot_x, ot_y, ot_tid = batch
+            else:
+                ot_x, ot_y, ot_tid, l = batch
+                ls.append(l)
 
             ot_tid = torch.full_like(ot_tid, self.past_dataset_tasks[c])
             x.append(ot_x)
             y.append(ot_y)
             t.append(ot_tid)
 
-        return torch.cat(x, 0), torch.cat(y, 0), torch.cat(t, 0)
+        if len(ls) > 0:
+            ls = torch.cat(ls)
+        return torch.cat(x, 0), torch.cat(y, 0), torch.cat(t, 0), ls
 
     def _before_forward_f(self, **kwargs):
 
@@ -182,7 +196,13 @@ class Margin(SupervisedTemplate):
         if len(self.past_dataset) == 0:
             return None
 
-        x, y, t = self.sample_past_batch(len(self.mb_x))
+        batch = self.sample_past_batch(len(self.mb_x))
+        if len(batch) == 3:
+            x, y, t = batch
+        else:
+            x, y, t, l = batch
+            self.past_logits = l
+
         self.current_mb_size = len(self.mb_x)
 
         current_task = self.experience.current_experience
@@ -225,21 +245,94 @@ class Margin(SupervisedTemplate):
         self.past_model = deepcopy(self.model)
         self.past_model.eval()
 
+    @torch.no_grad()
+    def _after_training_exp_logits(self, **kwargs):
+        tid = self.experience.current_experience
+
+        samples_to_save = self.memory_size // len(
+            self.experience.classes_seen_so_far)
+
+        for k, d in self.past_dataset.items():
+            indexes = np.arange(len(d))
+
+            if len(indexes) > samples_to_save:
+                selected = np.random.choice(indexes, samples_to_save, False)
+                d = d.train().subset(selected)
+
+                # all_logits = []
+                # for x, y, _, l in DataLoader(d, batch_size=self.train_mb_size):
+                #     _l = self.model(x.to(self.device))[0]
+                #     _l = _l.cpu()
+                #     l = torch.cat((l, _l[:, l.shape[-1]:]), -1)
+                #     all_logits.append(l)
+                #
+                # all_logits = torch.cat(all_logits, 0)
+                # d.logits = all_logits
+
+                self.past_dataset[k] = d
+
+        dataset = self.experience.dataset
+        ys = np.asarray(dataset.targets)
+
+        self.model.eval()
+        for y in np.unique(ys):
+            indexes = np.argwhere(ys == y).reshape(-1)
+            indexes = np.random.choice(indexes, samples_to_save, False)
+            all_logits = []
+            for x, _, _ in DataLoader(dataset.eval().subset(indexes),
+                                      batch_size=self.eval_mb_size):
+                x = x.to(self.device)
+
+                logits = self.model(x)[0]
+                logits = torch.cat(logits, -1)
+                all_logits.append(logits.cpu())
+
+            all_logits = torch.cat(all_logits, 0)
+
+            d = LogitsDataset(dataset.train().subset(indexes), all_logits)
+
+            self.past_dataset[y] = d
+            self.past_dataset_tasks[y] = tid
+
+        # if self.experience.current_experience > 0:
+        self.past_model = deepcopy(self.model)
+        self.past_model.eval()
+
     def _before_forward(self, **kwargs):
         super()._before_forward(**kwargs)
         self._before_forward_f(**kwargs)
 
     @torch.no_grad()
     def _before_training_exp(self, **kwargs):
+        tid = self.experience.current_experience
 
         super()._before_training_exp(**kwargs)
 
-        if len(self.past_dataset) > 0:
+        if len(self.past_dataset) > 0 and not self.use_logits:
             self.past_model = deepcopy(self.model)
             self.past_model.eval()
 
         self.future_margins.append(self.future_margin)
-        # self.future_margin = self.future_margin + self.past_margin * 2
+
+        if self.use_logits:
+            self.model.eval()
+
+            for k, d in self.past_dataset.items():
+                all_logits = []
+                for x, y, _, l in DataLoader(d.eval(), batch_size=self.train_mb_size):
+                    _l = self.model(x.to(self.device))[0]
+                    _l = _l[tid].cpu()
+                    l = torch.cat((l, _l), -1)
+                    all_logits.append(l)
+
+                all_logits = torch.cat(all_logits, 0)
+                d.logits = all_logits
+
+                self.past_dataset[k] = d
+
+            self.model.train()
+
+        # self.future_margin =      zself.future_margin + self.past_margin * 2
         # self.future_margins.append(self.future_margin)
 
     def _before_training_epoch(self, **kwargs):
@@ -391,27 +484,27 @@ class Margin(SupervisedTemplate):
                 # else:
                 #     factor = 1
 
-                if self.past_model is not None:
-                    bs = len(self.mb_output) // 2
-
+                if len(self.past_dataset) > 0:
                     x, y, tids = self.mbatch
                     curr_logits = self.mb_output
-
-                    with torch.no_grad():
-                        past_logits, _ = self.past_model(x)
-
                     mask = tids != tid
 
+                    if self.use_logits:
+                        past_logits = self.past_logits.to(x.device)
+                    else:
+                        with torch.no_grad():
+                            past_logits, _ = self.past_model(x)
+                            past_logits = torch.cat(past_logits, -1)[mask]
+
                     co = torch.cat(curr_logits, -1)[mask]
-                    po = torch.cat(past_logits, -1)[mask]
 
                     if self.logit_regularization == 'mse':
-                        past_reg_loss = nn.functional.mse_loss(co, po,
+                        past_reg_loss = nn.functional.mse_loss(co, past_logits,
                                                                reduction='mean')
                     else:
                         past_reg_loss = nn.functional.kl_div(
                             torch.log_softmax(co, -1),
-                            torch.softmax(po, -1),
+                            torch.softmax(past_logits, -1),
                             reduction='batchmean')
 
                     loss = loss + past_reg_loss * self.gamma * factor
