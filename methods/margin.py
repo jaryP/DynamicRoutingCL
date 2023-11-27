@@ -59,6 +59,7 @@ class Margin(SupervisedTemplate):
                  future_task_reg=1,
                  future_margin=3,
                  gamma=1,
+                 cumulative_memory=True,
                  reg_sampling_bs=None,
                  eval_mb_size: int = None,
                  device=None,
@@ -78,6 +79,8 @@ class Margin(SupervisedTemplate):
         self.tasks_nclasses = dict()
         self.current_mb_size = 0
         self.future_logits = None
+
+        self.cumulative_memory = cumulative_memory
 
         self.double_sampling = -1 if reg_sampling_bs is None else reg_sampling_bs
 
@@ -192,10 +195,14 @@ class Margin(SupervisedTemplate):
     @torch.no_grad()
     def _after_training_exp_f(self, **kwargs):
 
-        samples_to_save = self.memory_size // len(
-            self.experience.classes_seen_so_far)
-        tid = self.experience.current_experience
+        if self.cumulative_memory:
+            samples_to_save = self.memory_size // len(
+                self.experience.classes_seen_so_far)
+        else:
+            samples_to_save = self.memory_size
 
+        tid = self.experience.current_experience
+        
         for k, d in self.past_dataset.items():
             indexes = np.arange(len(d))
 
