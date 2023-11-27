@@ -59,6 +59,7 @@ class Margin(SupervisedTemplate):
                  future_task_reg=1,
                  future_margin=3,
                  gamma=1,
+                 use_logits_memory=False,
                  cumulative_memory=True,
                  reg_sampling_bs=None,
                  eval_mb_size: int = None,
@@ -101,7 +102,7 @@ class Margin(SupervisedTemplate):
 
         self.memory_size = mem_size
 
-        self.use_logits = True
+        self.use_logits_memory = use_logits_memory
 
         if batch_size_mem is None:
             self.batch_size_mem = train_mb_size
@@ -135,7 +136,7 @@ class Margin(SupervisedTemplate):
         super()._after_training_iteration(**kwargs)
 
     def _after_training_exp(self, **kwargs):
-        if self.use_logits:
+        if self.use_logits_memory:
             self._after_training_exp_logits()
         else:
             self._after_training_exp_f(**kwargs)
@@ -308,13 +309,13 @@ class Margin(SupervisedTemplate):
 
         super()._before_training_exp(**kwargs)
 
-        if len(self.past_dataset) > 0 and not self.use_logits:
+        if len(self.past_dataset) > 0 and not self.use_logits_memory:
             self.past_model = deepcopy(self.model)
             self.past_model.eval()
 
         self.future_margins.append(self.future_margin)
 
-        if self.use_logits:
+        if self.use_logits_memory:
             self.model.eval()
 
             for k, d in self.past_dataset.items():
@@ -489,7 +490,7 @@ class Margin(SupervisedTemplate):
                     curr_logits = self.mb_output
                     mask = tids != tid
 
-                    if self.use_logits:
+                    if self.use_logits_memory:
                         past_logits = self.past_logits.to(x.device)
                     else:
                         with torch.no_grad():
