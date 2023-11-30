@@ -71,7 +71,7 @@ class Margin(SupervisedTemplate):
                  eval_every=-1,
                  ):
 
-        assert margin_type in ['fixed', 'adaptive', 'normal', 'mean']
+        assert margin_type in ['fixed', 'adaptive', 'normal', 'mean', 'max_mean']
         assert 0 <= past_margin <= 1
 
         assert rehearsal_metric in ['kl', 'mse']
@@ -433,9 +433,8 @@ class Margin(SupervisedTemplate):
                         margin = torch.minimum(margin, torch.full_like(margin, (1 / (distr.shape[-1] - 1))))
                     elif self.margin_type == 'mean':
                         margin = (1 - mx_current_classes.mean()) * self.past_margin
-                        # margin = mx_current_classes.mean() * self.past_margin
-                        # margin = torch.minimum(margin,
-                        #                        torch.full_like(margin, (1 / (distr.shape[-1]))))
+                    elif self.margin_type == 'max_mean':
+                        margin = past_max.mean() * self.past_margin
                     else:
                         margin = (1 / (distr.shape[-1] - 1))
 
