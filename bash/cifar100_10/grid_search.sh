@@ -17,7 +17,7 @@ der)
         while (( ${num_jobs@P} >= $((max_jobs + 0)) )); do
           wait -n
         done
-        python main.py +scenario=cil_cifar100_10 +model="$MODEL" +training=cifar100 +method=der_default device=$DEVICE +model.head_classes=100 method.alpha=$alpha method.beta=$beta experiment=dev method.mem_size=$memory hydra=search &
+        python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=der_default device=$DEVICE +model.head_classes=100 method.alpha=$alpha method.beta=$beta experiment=dev method.mem_size=$memory hydra=search &
       done
     done
   done
@@ -30,7 +30,7 @@ do
     while (( ${num_jobs@P} >= $((max_jobs + 0)) )); do
       wait -n
     done
-    python main.py +scenario=cil_cifar100_10 +model="$MODEL" +training=cifar100 +method=margin_cifar10 device=$DEVICE method.mem_size=$memory method.past_task_reg=$past_margin_w method.gamma=1 +method.alpha=0 +wadnb_tags=[grid_search_margin] method.margin_type=adaptive +method.rehearsal_metric='kl' experiment=dev hydra=search &
+    python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=margin_cifar10 device=$DEVICE method.mem_size=$memory method.past_task_reg=$past_margin_w method.gamma=1 +method.alpha=0 +wadnb_tags=[grid_search_margin] method.margin_type=adaptive +method.rehearsal_metric='kl' experiment=dev hydra=search &
   done
 done
 ;;
