@@ -21,10 +21,10 @@ gem)
 #  python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=cml_01 optimizer=sgd  device="$DEVICE"
 #;;
 margin)
-python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=margin_cifar10 head=margin_head device=$DEVICE method.mem_size=200 method.past_task_reg=0.25 method.gamma=1 +method.alpha=0 +wadnb_tags=[final_results_margin] method.margin_type=adaptive +method.rehearsal_metric='kl'
-python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=margin_cifar10 head=margin_head device=$DEVICE method.mem_size=500 method.past_task_reg=0.25 method.gamma=1 +method.alpha=0 +wadnb_tags=[final_results_margin] method.margin_type=adaptive +method.rehearsal_metric='kl'
-python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=margin_cifar10 head=margin_head device=$DEVICE method.mem_size=1000 method.past_task_reg=0.5 method.gamma=1 +method.alpha=0 +wadnb_tags=[final_results_margin] method.margin_type=adaptive +method.rehearsal_metric='kl'
-python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=margin_cifar10 head=margin_head device=$DEVICE method.mem_size=2000 method.past_task_reg=0.5 method.gamma=1 +method.alpha=0 +wadnb_tags=[final_results_margin] method.margin_type=adaptive +method.rehearsal_metric='kl'
+python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=margin_cifar10 head=margin_head device=$DEVICE method.mem_size=200 method.past_task_reg=0.1 method.gamma=1 +method.alpha=0 +wadnb_tags=[final_results_margin] method.margin_type=adaptive +method.rehearsal_metric='kl'
+python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=margin_cifar10 head=margin_head device=$DEVICE method.mem_size=500 method.past_task_reg=0.5 method.gamma=1 +method.alpha=0 +wadnb_tags=[final_results_margin] method.margin_type=adaptive +method.rehearsal_metric='kl'
+python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=margin_cifar10 head=margin_head device=$DEVICE method.mem_size=1000 method.past_task_reg=0.25 method.gamma=1 +method.alpha=0 +wadnb_tags=[final_results_margin] method.margin_type=adaptive +method.rehearsal_metric='kl'
+python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=margin_cifar10 head=margin_head device=$DEVICE method.mem_size=2000 method.past_task_reg=1 method.gamma=1 +method.alpha=0 +wadnb_tags=[final_results_margin] method.margin_type=adaptive +method.rehearsal_metric='kl'
 ;;
 naive)
   python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100  +method=naive optimizer=sgd  device="$DEVICE"

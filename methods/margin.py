@@ -52,7 +52,7 @@ class Margin(SupervisedTemplate):
                  train_epochs: int = 1,
                  alpha: float = 0,
                  past_task_reg=1,
-                 rehearsal_metric='mse',
+                 rehearsal_metric='kl',
                  margin_type='adaptive',
                  past_margin=0.5,
                  warm_up_epochs=-1,

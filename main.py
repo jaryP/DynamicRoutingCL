@@ -22,7 +22,8 @@ from torch.utils.data import DataLoader
 
 import methods.routing
 from base.scenario import get_dataset_nc_scenario
-from methods.debug_plugins import GradientsDebugPlugin, LogitsDebugPlugin
+from methods.debug_plugins import GradientsDebugPlugin, LogitsDebugPlugin, \
+    TrainDebugPlugin
 from models.base import get_cl_model
 from models.utils import AvalanceCombinedModel, ScaledClassifier, \
     PytorchCombinedModel
@@ -312,6 +313,8 @@ def avalanche_training(cfg: DictConfig):
                     debug_plugins = [LogitsDebugPlugin(cfg.debug_path)]
                 if plugin_name =='der':
                     debug_plugins = [GradientsDebugPlugin(cfg.debug_path)]
+                if plugin_name =='margin':
+                    debug_plugins = [TrainDebugPlugin(cfg.debug_path)]
 
             if cfg is not None and '_target_' in cfg.method:
                 if plugin_name == 'icarl':
