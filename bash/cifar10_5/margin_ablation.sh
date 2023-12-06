@@ -4,7 +4,7 @@ ABLATION=$1
 MODEL=$2
 DEVICE=$3
 
-max_jobs=$3
+max_jobs=$4
 
 num_jobs="\j"
 
