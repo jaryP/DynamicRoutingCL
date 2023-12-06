@@ -1,5 +1,6 @@
 from typing import Tuple, Dict
 
+import numpy as np
 import torch
 from avalanche.benchmarks import CLExperience
 from avalanche.benchmarks.utils import AvalancheDataset, ConstantSequence
@@ -305,3 +306,48 @@ class ScaledClassifier(MultiTaskModule):
                 future = torch.cat(future, -1)
 
         return logits, future
+
+
+class SimplexClassifier(nn.Module):
+    def __init__(
+            self,
+            in_features,
+            out_features=None,
+            *kwargs
+    ):
+        super().__init__()
+
+        self.in_features = in_features
+        self.classifier = torch.tensor(self.dsimplex(in_features),
+                                       dtype=torch.float)
+
+    @staticmethod
+    def dsimplex(num_classes=10):
+        def simplex_coordinates2(m):
+            x = np.zeros([m, m + 1])
+            np.fill_diagonal(x, 1.0)
+
+            a = (1.0 - np.sqrt(float(1 + m))) / float(m)
+
+            x[:, m] = a
+
+            c = np.zeros(m)
+            for i in range(0, m):
+                s = 0.0
+                for j in range(0, m + 1):
+                    s = s + x[i, j]
+                c[i] = s / float(m + 1)
+
+            for j in range(0, m + 1):
+                for i in range(0, m):
+                    x[i, j] = x[i, j] - c[i]
+
+            x = x / np.linalg.norm(x, axis=0, keepdims=True)
+
+            return x
+
+        ds = simplex_coordinates2(num_classes)
+        return ds
+
+    def forward(self, x):
+        return x @ self.classifier

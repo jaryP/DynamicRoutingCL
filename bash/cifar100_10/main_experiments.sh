@@ -47,6 +47,12 @@ replay)
   python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=replay_1000 optimizer=sgd  device="$DEVICE"
   python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=replay_2000 optimizer=sgd  device="$DEVICE"
 ;;
+rpc)
+  python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=replay_200 optimizer=sgd  device="$DEVICE" head=simplex
+  python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=replay_500 optimizer=sgd  device="$DEVICE" head=simplex
+  python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=replay_1000 optimizer=sgd  device="$DEVICE" head=simplex
+  python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=replay_2000 optimizer=sgd  device="$DEVICE" head=simplex
+;;
 ssil)
   python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=ssil_200 optimizer=sgd  device="$DEVICE" training.epochs=100
   python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=ssil_500 optimizer=sgd  device="$DEVICE" training.epochs=100

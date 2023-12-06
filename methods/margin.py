@@ -530,3 +530,171 @@ class Margin(SupervisedTemplate):
                 loss += future_reg
 
         return loss
+
+
+class IncrementalMargin(Margin):
+    def __init__(self, model,
+                 optimizer: Optimizer,
+                 mem_size: int,
+                 train_mb_size: int = 1,
+                 train_epochs: int = 1,
+                 alpha: float = 0,
+                 past_task_reg=1,
+                 regularize_logits=False,
+                 rehearsal_metric='kl',
+                 margin_type='adaptive',
+                 margin=0.5,
+                 warm_up_epochs=-1,
+                 future_task_reg=0,
+                 future_margin=3,
+                 gamma=1,
+                 use_logits_memory=False,
+                 cumulative_memory=True,
+                 reg_sampling_bs=None,
+                 eval_mb_size: int = None,
+                 device=None,
+                 plugins=None,
+                 batch_size_mem=None,
+                 criterion=None,
+                 evaluator: EvaluationPlugin = default_evaluator,
+                 eval_every=-1,
+                 ):
+
+        super().__init__(model=model, optimizer=optimizer, mem_size=mem_size,
+                         train_mb_size=train_mb_size, alpha=alpha,
+                         past_task_reg=past_task_reg, margin=margin,
+                         rehearsal_metric=rehearsal_metric,
+                         regularize_logits=regularize_logits,
+                         margin_type=margin_type, train_epochs=train_epochs,
+                         warm_up_epochs=warm_up_epochs,
+                         gamma=gamma, use_logits_memory=use_logits_memory,
+                         future_task_reg=future_task_reg,
+                         future_margin=future_margin, eval_every=eval_every,
+                         cumulative_memory=cumulative_memory,
+                         reg_sampling_bs=reg_sampling_bs,
+                         eval_mb_size=eval_mb_size, device=device,
+                         plugins=plugins, batch_size_mem=batch_size_mem,
+                         criterion=criterion, evaluator=evaluator)
+
+
+    def _after_forward(self, **kwargs):
+        return
+
+    def _after_eval_forward(self, **kwargs):
+        return
+
+    def _before_training_epoch(self, **kwargs):
+        return
+
+    def criterion(self):
+        tid = self.experience.current_experience
+
+        if not self.is_training:
+            loss_val = nn.functional.cross_entropy(self.mb_output,
+                                                   self.mb_y)
+
+            return loss_val
+
+        if len(self.past_dataset) == 0:
+            loss = nn.functional.cross_entropy(self.mb_output, self.mb_y,
+                                               label_smoothing=0)
+        else:
+            ce_loss = 0
+            margin_loss = 0
+            margin_den = 0
+            ce_den = 0
+
+            bs = len(self.mb_x)
+
+            for t in torch.unique(self.mb_task_id):
+                if t < tid and self.alpha <= 0:
+                    continue
+                    # loss = loss * self.alpha
+
+                mask = self.mb_task_id == t
+                ce_den += mask.sum().item()
+
+                y = self.mb_y[mask]
+                co = self.mb_output[mask]
+                past_classes = len(self.past_dataset)
+
+                if t > 0:
+                    distr = self.mb_output[mask]
+
+                    if self.regularize_logits:
+                        mx_current_classes = distr[range(len(co)), y]
+                        past_max = distr[:, :past_classes].max(-1).values
+                    else:
+
+                        distr = torch.softmax(distr, -1)
+
+                        mx_current_classes = distr[range(len(co)), y]
+                        past_max = distr[:, :past_classes].max(-1).values
+
+                    y = y - past_classes
+
+                    if self.margin_type == 'fixed':
+                        margin = self.margin
+                    elif self.margin_type == 'normal':
+                        margin = self.margin_distribution.rsample([len(distr)])
+                        margin = torch.clip(margin, 0, 1)
+                        margin = margin * self.margin
+                        margin = torch.minimum(margin, torch.full_like(margin, (
+                                    1 / (distr.shape[-1] - 1))))
+                    elif self.margin_type == 'mean':
+                        margin = (1 - mx_current_classes.mean()) * self.margin
+                    elif self.margin_type == 'max_mean':
+                        margin = past_max.mean() * self.margin
+                    else:
+                        margin = (1 / (distr.shape[-1] - 1))
+
+                    margin_dist = torch.relu(
+                        past_max - mx_current_classes + margin)
+
+                    margin_loss += margin_dist.mean()
+
+                loss = nn.functional.cross_entropy(co[:, past_classes:], y, reduction='sum')
+
+                if t < tid:
+                    loss = loss * self.alpha
+
+                ce_loss += loss
+
+            w = 1
+            if self.warm_up_epochs > 0:
+                w = min(1, (
+                            self.clock.train_exp_epochs / self.warm_up_epochs) ** 2)
+
+            margin_loss = margin_loss * self.past_task_reg * w
+            ce_loss = (ce_loss / ce_den)
+
+            loss = ce_loss + margin_loss
+
+            if self.gamma > 0:
+                factor = 1
+
+                if len(self.past_dataset) > 0:
+                    x, y, tids = self.mbatch
+                    curr_logits = self.mb_output
+                    mask = tids != tid
+
+                    if self.use_logits_memory:
+                        past_logits = self.past_logits.to(x.device)
+                    else:
+                        with torch.no_grad():
+                            past_logits = self.past_model(x[mask])
+
+                    co = curr_logits[mask]
+
+                    if self.logit_regularization == 'mse':
+                        past_reg_loss = nn.functional.mse_loss(co, past_logits,
+                                                               reduction='mean')
+                    else:
+                        past_reg_loss = nn.functional.kl_div(
+                            torch.log_softmax(co, -1),
+                            torch.softmax(past_logits, -1),
+                            reduction='batchmean')
+
+                    loss = loss + past_reg_loss * self.gamma * factor
+
+        return loss

@@ -239,7 +239,7 @@ def avalanche_training(cfg: DictConfig):
                 elif plugin_name == 'der':
                     assert isinstance(head, torch.nn.Linear)
 
-                if plugin_name in ['margin', 'der']:
+                if plugin_name in ['margin', 'incrementalmargin', 'der']:
                     model = PytorchCombinedModel(backbone, head)
                 else:
                     model = AvalanceCombinedModel(backbone, head)
