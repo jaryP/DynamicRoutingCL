@@ -279,7 +279,7 @@ class ContinuosRouting(SupervisedTemplate):
             self.past_model.eval()
 
         self.future_margins.append(self.future_margin)
-        # self.future_margin = self.future_margin + self.past_margin * 2
+        # self.future_margin = self.future_margin + self.margin * 2
         # self.future_margins.append(self.future_margin)
 
     def criterion(self):
@@ -342,7 +342,7 @@ class ContinuosRouting(SupervisedTemplate):
                     #
                     # mx_current_classes = co[range(len(co)), y]
 
-                    # margin_dist = torch.relu(past_max - mx_current_classes + self.past_margin)
+                    # margin_dist = torch.relu(past_max - mx_current_classes + self.margin)
                     # margin_dist = torch.relu(past_max - mx_current_classes + (1 / (distr.shape[-1] - 1)))
                     margin = mx_current_classes.mean() / 2
                     margin_dist = torch.relu(past_max - mx_current_classes + margin)

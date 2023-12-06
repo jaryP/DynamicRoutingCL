@@ -20,7 +20,7 @@ from avalanche.benchmarks.datasets.external_datasets import get_cifar10_dataset,
     get_cifar100_dataset
 
 
-def get_permutation(n_classe):
+def get_permutation(n_classes):
     @lru_cache(maxsize=None)
     def rule_asc(n):
         a = [0 for i in range(n + 1)]
@@ -38,7 +38,7 @@ def get_permutation(n_classe):
             yield a[:k + 1]
 
     divisions = list(filter(lambda x: not 1 in x and len(x) > 1,
-                            rule_asc(n_classe)))
+                            rule_asc(n_classes)))
 
     all_divisions = []
     for d in divisions:

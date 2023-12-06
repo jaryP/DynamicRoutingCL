@@ -51,7 +51,7 @@ done
 ##  routing_3l_convblock_invusage
 #  for memory in 200 500 1000 2000
 #  do
-#    for past_margin in 0.1 0.2 0.3 0.5
+#    for margin in 0.1 0.2 0.3 0.5
 #    do
 #      for past_margin_w in 1 0.5 0.1 0.01 0.001
 #      do
@@ -61,7 +61,7 @@ done
 ##            for gamma in 1 0.5 0.1
 #            for gamma in 1 0.5 0.1 0.0
 #            do
-#              python main.py +scenario=cil_cifar100_10 +model=$MODEL +training=cifar10_5 +method=routing_cifar10 optimizer=adam device=$DEVICE experiment=dev method.mem_size=$memory method.past_margin=$past_margin  method.future_margin=$future_margin method.past_task_reg=$past_margin_w method.future_task_reg=0.5 method.gamma=$gamma hydra=search
+#              python main.py +scenario=cil_cifar100_10 +model=$MODEL +training=cifar10_5 +method=routing_cifar10 optimizer=adam device=$DEVICE experiment=dev method.mem_size=$memory method.margin=$margin  method.future_margin=$future_margin method.past_task_reg=$past_margin_w method.future_task_reg=0.5 method.gamma=$gamma hydra=search
 #            done
 #          done
 #        done
@@ -73,7 +73,7 @@ done
 ##  routing_3l_convblock_invusage
 #  for memory in 200 500 1000 2000
 #  do
-#    for past_margin in 1 0.3 0.2
+#    for margin in 1 0.3 0.2
 #     do
 #      for past_margin_w in 0.5 0.1 0.01
 #      do
@@ -85,7 +85,7 @@ done
 #                do
 #                for pt in task
 #                do
-#              python main.py +scenario=cil_cifar100_10 +model=$MODEL +training=cifar10_5 +method=routing_cifar10 optimizer=adam device=$DEVICE experiment=dev method.mem_size=$memory method.past_margin=$past_margin  method.future_margin=$future_margin method.past_task_reg=$past_margin_w method.future_task_reg=1 method.gamma=$gamma hydra=search model.path_selection_strategy=$pa model.prediction_mode=$pt wandb_prefix=routing_model_search_
+#              python main.py +scenario=cil_cifar100_10 +model=$MODEL +training=cifar10_5 +method=routing_cifar10 optimizer=adam device=$DEVICE experiment=dev method.mem_size=$memory method.margin=$margin  method.future_margin=$future_margin method.past_task_reg=$past_margin_w method.future_task_reg=1 method.gamma=$gamma hydra=search model.path_selection_strategy=$pa model.prediction_mode=$pt wandb_prefix=routing_model_search_
 #            done
 #            done
 #            done

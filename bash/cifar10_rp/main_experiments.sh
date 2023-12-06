@@ -61,10 +61,10 @@ margin)
 #  python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=er_ace_default method.mem_size=2000   device="$DEVICE"
 ;;
 #routing)
-#  python main.py +scenario=cil_cifar10_rp model=routing_5l_convblock_p +training=cifar10_5 +method=routing_cifar10  device=$DEVICE method.past_task_reg=0.01 method.past_margin=1 method.gamma=1  experiment=base10
-#  python main.py +scenario=cil_cifar10_rp model=routing_5l_convblock_p +training=cifar10_5 +method=routing_cifar10  device=$DEVICE method.past_task_reg=0.01 method.past_margin=0.3 method.mem_size=500 method.gamma=1  experiment=base10
-#  python main.py +scenario=cil_cifar10_rp model=routing_5l_convblock_p +training=cifar10_5 +method=routing_cifar10  device=$DEVICE method.past_task_reg=0.01 method.past_margin=0.3 method.mem_size=1000 method.gamma=1  experiment=base10
-#  python main.py +scenario=cil_cifar10_rp model=routing_5l_convblock_p +training=cifar10_5 +method=routing_cifar10  device=$DEVICE method.past_task_reg=0.1 method.past_margin=1 method.mem_size=2000 method.gamma=1  experiment=base10
+#  python main.py +scenario=cil_cifar10_rp model=routing_5l_convblock_p +training=cifar10_5 +method=routing_cifar10  device=$DEVICE method.past_task_reg=0.01 method.margin=1 method.gamma=1  experiment=base10
+#  python main.py +scenario=cil_cifar10_rp model=routing_5l_convblock_p +training=cifar10_5 +method=routing_cifar10  device=$DEVICE method.past_task_reg=0.01 method.margin=0.3 method.mem_size=500 method.gamma=1  experiment=base10
+#  python main.py +scenario=cil_cifar10_rp model=routing_5l_convblock_p +training=cifar10_5 +method=routing_cifar10  device=$DEVICE method.past_task_reg=0.01 method.margin=0.3 method.mem_size=1000 method.gamma=1  experiment=base10
+#  python main.py +scenario=cil_cifar10_rp model=routing_5l_convblock_p +training=cifar10_5 +method=routing_cifar10  device=$DEVICE method.past_task_reg=0.1 method.margin=1 method.mem_size=2000 method.gamma=1  experiment=base10
 #;;
 #cope)
 #  python main.py +scenario=cil_cifar10_rp model="$MODEL" +training=cifar10_5 +method=cope   device="$DEVICE" experiment=base10 hydra.run.dir='./results/ci_cifar10/"$MODEL"/cope/cope_500'

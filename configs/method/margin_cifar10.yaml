@@ -1,9 +1,11 @@
 _target_: methods.margin.Margin
 mem_size: 200
 past_task_reg: 0.1
-past_margin: 0.2
+margin: 1
 warm_up_epochs: -1
-future_task_reg: 1
-future_margin: 5
+future_task_reg: 0
+future_margin: 0
 gamma: 1
+alpha: 0
+rehearsal_metric: kl
 margin_type: adaptive

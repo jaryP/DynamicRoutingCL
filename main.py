@@ -309,12 +309,13 @@ def avalanche_training(cfg: DictConfig):
 
             debug_plugins = []
             if cfg.get('debug_path', None) is not None:
+                debug_path = os.path.join(experiment_path, cfg.debug_path)
                 if plugin_name =='replay':
-                    debug_plugins = [LogitsDebugPlugin(cfg.debug_path)]
+                    debug_plugins = [LogitsDebugPlugin(debug_path)]
                 if plugin_name =='der':
-                    debug_plugins = [GradientsDebugPlugin(cfg.debug_path)]
+                    debug_plugins = [GradientsDebugPlugin(debug_path)]
                 if plugin_name =='margin':
-                    debug_plugins = [TrainDebugPlugin(cfg.debug_path)]
+                    debug_plugins = [TrainDebugPlugin(debug_path)]
 
             if cfg is not None and '_target_' in cfg.method:
                 if plugin_name == 'icarl':

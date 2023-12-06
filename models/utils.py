@@ -210,18 +210,21 @@ class bn_track_stats:
 
 class ScaledClassifier(MultiTaskModule):
     def __init__(
-        self,
-        in_features,
-        future_classes=None,
-        scale_each_class=True,
-        reset_scalers=False,
-        c=10, z=0.5,
+            self,
+            in_features,
+            future_classes=None,
+            scale_each_class=True,
+            scale=True,
+            reset_scalers=False,
+            c=10, z=0.5,
     ):
         super().__init__()
 
         self.in_features = in_features
         self.classifiers = torch.nn.ModuleDict()
-        self.past_scaling_heads = torch.nn.ModuleDict()
+
+        self.past_scaling_heads = torch.nn.ModuleDict() if scale else None
+
         self.c = c
         self.z = z
 
@@ -234,19 +237,18 @@ class ScaledClassifier(MultiTaskModule):
         self.future_classes = future_classes
         self.future_layers = None
         if future_classes is not None and future_classes > 0:
-            self.future_layers = torch.nn.ModuleList([nn.Linear(self.in_features, 1)
-                                                      for _ in range(future_classes)])
+            self.future_layers = torch.nn.ModuleList(
+                [nn.Linear(self.in_features, 1)
+                 for _ in range(future_classes)])
 
     def adaptation(self, experience: CLExperience):
         super().adaptation(experience)
         device = self._adaptation_device
         curr_classes = experience.classes_in_this_experience
         task_labels = experience.task_labels
-        # if isinstance(task_labels, ConstantSequence):
-        #     # task label is unique. Don't check duplicates.
-        #     task_labels = [task_labels[0]]
 
-        if len(self.past_scaling_heads) > 0 and self.reset_scalers:
+        if self.past_scaling_heads is not None and \
+                len(self.past_scaling_heads) > 0 and self.reset_scalers:
             for p in self.past_scaling_heads.parameters():
                 if hasattr(p, 'reset_parameters'):
                     p.reset_parameters()
@@ -261,7 +263,8 @@ class ScaledClassifier(MultiTaskModule):
             if tid not in self.classifiers:  # create new head
                 past_classifiers = len(self.classifiers)
 
-                new_head = nn.Linear(self.in_features, len(curr_classes)).to(device)
+                new_head = nn.Linear(self.in_features, len(curr_classes)).to(
+                    device)
 
                 if (self.future_layers is not None and
                         len(self.future_layers) > 0):
@@ -273,20 +276,21 @@ class ScaledClassifier(MultiTaskModule):
                     new_head.weight[:len(w)] = w
                     new_head.bias[:len(b)] = b
 
-                    for i in range(len(w)):
-                        self.future_layers[i] = nn.Linear(self.in_features, 1)
+                    # for i in range(len(w)):
+                    #     self.future_layers[i] = nn.Linear(self.in_features, 1)
 
                 self.classifiers[tid] = new_head
 
-                if past_classifiers > 0:
-                    scalers = nn.ModuleList([nn.Linear(self.in_features, len(c) if self.scale_each_class else 1)
+                if past_classifiers > 0 and self.past_scaling_heads is not None:
+                    scalers = nn.ModuleList([nn.Linear(self.in_features,
+                                                       len(c) if self.scale_each_class else 1)
                                              for c in self.classes_seen_so_far])
                     self.past_scaling_heads[tid] = scalers
 
     def forward(self, x, task_labels=None):
         logits = [c(x) for c in self.classifiers.values()]
 
-        if len(logits) > 1:
+        if len(logits) > 1 and self.past_scaling_heads is not None:
             scalers = [[torch.sigmoid(self.z * s(x) + self.c) for s in v]
                        for v in self.past_scaling_heads.values()]
 
@@ -295,9 +299,9 @@ class ScaledClassifier(MultiTaskModule):
                     logits[j] = logits[j] * s
 
         future = None
-        # with torch.no_grad():
-        if self.future_layers is not None and self.training:
-            future = [f(x) for f in self.future_layers]
-            future = torch.cat(future, -1)
+        with torch.no_grad():
+            if self.future_layers is not None and self.training:
+                future = [f(x) for f in self.future_layers]
+                future = torch.cat(future, -1)
 
         return logits, future

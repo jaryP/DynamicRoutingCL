@@ -184,53 +184,104 @@ class TrainDebugPlugin(SupervisedPlugin, supports_distributed=True):
         super().__init__()
 
         self.replay_buffer = None
+
         self.history = defaultdict(list)
+        self.after_task_history = dict()
+
         self.mem_size = mem_size
         self.batch_size = batch_size
         self.batch_size_mem = batch_size_mem
         self.task_balanced_dataloader = task_balanced_dataloader
 
         self.saving_path = os.path.join(saving_path, 'logits.pkl')
+        self.saving_path2 = os.path.join(saving_path, 'after_logits.pkl')
+
         self.eval_saving_path = os.path.join(saving_path, 'eval_scores.pkl')
         os.makedirs(saving_path, exist_ok=True)
+
+        self.all_dataset = []
 
     def after_training_exp(self, strategy: Template, *args, **kwargs):
         with open(self.saving_path, 'wb') as f:
             pickle.dump(self.history, f)
 
-    def after_training_epoch(
-            self, strategy: Template, *args, **kwargs
-    ) -> CallbackResult:
-        if strategy.experience.current_experience == 0:
-            return
+        with open(self.saving_path2, 'wb') as f:
+            pickle.dump(self.after_task_history, f)
 
-        strategy.model.eval()
-        self.update_logits(strategy, self.replay_buffer)
-        strategy.model.train()
+    def after_train_dataset_adaptation(
+        self, strategy: Template, *args, **kwargs
+    ) -> CallbackResult:
+
+        dataset = strategy.experience.current_experience
+        self.all_dataset.append(dataset)
+
+        tid = strategy.experience.current_experience
+        res = self.update_logits(strategy, self.replay_buffer)
+        self.after_task_history[tid] = res
+
+        with open(self.saving_path, 'wb') as f:
+            pickle.dump(self.history, f)
+
+        with open(self.saving_path2, 'wb') as f:
+            pickle.dump(self.after_task_history, f)
+    #
+    # def before_training_exp(self, strategy: Template, *args, **kwargs):
+    #     dataset = strategy.experience.current_experience
+    #     self.all_dataset.append(dataset)
+    #
+    #     tid = strategy.experience.current_experience
+    #     res = self.update_logits(strategy, self.replay_buffer)
+    #     self.after_task_history[tid] = res
+    #
+    #     with open(self.saving_path, 'wb') as f:
+    #         pickle.dump(self.history, f)
+    #
+    #     with open(self.saving_path2, 'wb') as f:
+    #         pickle.dump(self.after_task_history, f)
+    #
+    # def after_training_epoch(
+    #         self, strategy: Template, *args, **kwargs
+    # ) -> CallbackResult:
+    #     if strategy.experience.current_experience == 0:
+    #         return
+    #     tid = strategy.experience.current_experience
+    #
+    #     res = self.update_logits(strategy, self.replay_buffer)
+    #     self.history[tid].append(res)
+    #
+    # def before_training_epoch(
+    #     self, strategy: Template, *args, **kwargs
+    # ) -> CallbackResult:
+    #     a = 0
 
     @torch.no_grad()
-    # @torch.inference_mode()
     def update_logits(self, strategy, dataset):
-        tid = strategy.experience.current_experience
-        dataloader = DataLoader(strategy.experience.dataset,
-                                batch_size=32)
+        strategy.model.eval()
 
-        all_logits = []
-        all_probs = []
-        all_labels = []
+        res = {}
+        for i, d in enumerate(self.all_dataset):
+            dataloader = DataLoader(strategy.experience.dataset,
+                                    batch_size=32)
 
-        for x, y, t in dataloader:
-            x = x.to(strategy.device)
+            all_logits = []
+            all_probs = []
+            all_labels = []
 
-            pred, _ = strategy.model(x)
-            pred = torch.cat(pred, -1)
-            all_logits.append(pred)
+            for x, y, t in dataloader:
+                x = x.to(strategy.device)
 
-            all_probs.append(torch.softmax(pred, -1))
-            all_labels.append(y)
+                pred, _ = strategy.model(x)
+                pred = torch.cat(pred, -1)
+                all_logits.append(pred)
 
-        all_logits = torch.cat(all_logits, 0).cpu().numpy()
-        all_probs = torch.cat(all_probs, 0).cpu().numpy()
-        all_labels = torch.cat(all_labels, 0).cpu().numpy()
+                all_probs.append(torch.softmax(pred, -1))
+                all_labels.append(y)
 
-        self.history[tid].append((all_logits, all_probs, all_labels))
+            all_logits = torch.cat(all_logits, 0).cpu().numpy()
+            all_probs = torch.cat(all_probs, 0).cpu().numpy()
+            all_labels = torch.cat(all_labels, 0).cpu().numpy()
+
+            res[i] = (all_logits, all_probs, all_labels)
+
+        strategy.model.train()
+        return res
