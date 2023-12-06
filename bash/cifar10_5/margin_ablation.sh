@@ -42,7 +42,7 @@ logit)
     while (( ${num_jobs@P} >= $((max_jobs + 0)) )); do
       wait -n
     done
-    python main.py +scenario=cil_cifar10_5 model=$MODEL +training=cifar10_5 +method=margin_cifar10 device=$DEVICE method.mem_size=500 method.past_task_reg=0.25 +model.regularize_logits=True +method.margin_type=fixed method.margin=$margin method.gamma=1 hydra=search +wadnb_tags=[margin_logits_ablation] head=margin_head &
+    python main.py +scenario=cil_cifar10_5 model=$MODEL +training=cifar10_5 +method=margin_cifar10 device=$DEVICE method.mem_size=500 method.past_task_reg=0.25 +model.regularize_logits=True method.margin_type=fixed method.margin=$margin method.gamma=1 hydra=search +wadnb_tags=[margin_logits_ablation] head=margin_head &
   done
 ;;
 *)
