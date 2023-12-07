@@ -325,6 +325,7 @@ class SimplexClassifier(nn.Module):
         self.in_features = in_features
         self.classifier = torch.tensor(self.dsimplex(in_features),
                                        dtype=torch.float)
+        self.classifier = nn.Parameter(self.classifier, requires_grad=False)
 
     @staticmethod
     def dsimplex(num_classes=10):
@@ -354,5 +355,5 @@ class SimplexClassifier(nn.Module):
         ds = simplex_coordinates2(num_classes)
         return ds
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         return x @ self.classifier
