@@ -217,7 +217,7 @@ class ScaledClassifier(MultiTaskModule):
             scale_each_class=True,
             scale=True,
             reset_scalers=False,
-            c=10, z=0.5,
+            c=20, z=0.1,
     ):
         super().__init__()
 
@@ -264,6 +264,10 @@ class ScaledClassifier(MultiTaskModule):
             if tid not in self.classifiers:  # create new head
                 past_classifiers = len(self.classifiers)
 
+                # for t in range(len(self.classifiers)):
+                # for p in self.classifiers.parameters():
+                #     p.requires_grad_(False)
+
                 new_head = nn.Linear(self.in_features, len(curr_classes)).to(
                     device)
 
@@ -287,6 +291,7 @@ class ScaledClassifier(MultiTaskModule):
                                                        len(c) if self.scale_each_class else 1)
                                              for c in self.classes_seen_so_far])
                     self.past_scaling_heads[tid] = scalers
+
 
     def forward(self, x, task_labels=None):
         logits = [c(x) for c in self.classifiers.values()]
