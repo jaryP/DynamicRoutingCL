@@ -51,7 +51,7 @@ logit)
 sigmoid)
   for a in 0 1 2.5 5 10 20
   do
-    for b in 0 1 0.5 1 2.5 5
+    for b in 1 0.5 1 2.5 5
     do
       while (( ${num_jobs@P} >= ${max_jobs:-1} )); do
         wait -n
