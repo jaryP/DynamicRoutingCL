@@ -56,9 +56,21 @@ sigmoid)
       while (( ${num_jobs@P} >= ${max_jobs:-1} )); do
         wait -n
       done
-      python main.py +scenario=cil_cifar10_5 model=$MODEL +training=cifar10_5 +method=margin device=$DEVICE method.mem_size=500 method.past_task_reg=0.25 +model.regularize_logits=True method.margin_type=fixed method.gamma=1 hydra=search +wadnb_tags=[margin_simgoid_ablation] head=margin_head head.a=$a head.b=$b &
+      python main.py +scenario=cil_cifar10_5 model=$MODEL +training=cifar10_5 +method=margin device=$DEVICE method.mem_size=500 method.past_task_reg=0.25 +model.regularize_logits=True method.gamma=1 hydra=search +wadnb_tags=[margin_simgoid_ablation] head=margin_head head.a=$a head.b=$b &
     done
   done
+;;
+tradeoff)
+for memory in 200 500 1000 2000 4000 6000 10000
+do
+  for past_margin_w in 0.5 0.25 0.1 0.05 0.025 0.01
+  do
+    while (( ${num_jobs@P} >= ${max_jobs:-1} )); do
+      wait -n
+    done
+    python main.py +scenario=cil_cifar10_5 model=$MODEL +training=cifar10_5 +method=margin_cifar10 device=$DEVICE method.mem_size=$memory method.past_task_reg=$past_margin_w method.gamma=1 +method.alpha=0 hydra=search +wadnb_tags=[sp_to_ablation] method.margin_type=adaptive +method.rehearsal_metric='kl' experiment=base1 head=margin_head &
+  done
+done
 ;;
 *)
   echo -n "Unrecognized ablation experiment"
