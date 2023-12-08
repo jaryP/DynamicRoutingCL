@@ -16,7 +16,7 @@ import matplotlib.gridspec as grid_spec
 plt.rcParams['text.usetex'] = True
 # plt.rcParams['text.latex.preamble'] = [r'\usepackage{amsmath}']
 
-path = '../cifar10/margin_future_reg_debug/debug_margin_logits'
+path = '/media/jary/Data/progetti/DynamicModelCL/cifar10/test_bias/1/debug_logits'
 
 with open(os.path.join(path, 'logits.pkl'), 'rb') as f:
     results = pickle.load(f)
