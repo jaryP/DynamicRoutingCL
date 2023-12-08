@@ -325,13 +325,14 @@ class SimplexClassifier(nn.Module):
     def __init__(
             self,
             in_features,
+            projection_space=1000,
             out_features=None,
             *kwargs
     ):
         super().__init__()
 
-        self.in_features = in_features
-        self.classifier = torch.tensor(self.dsimplex(in_features),
+        self.projector = nn.Linear(in_features, projection_space)
+        self.classifier = torch.tensor(self.dsimplex(projection_space),
                                        dtype=torch.float)
         self.classifier = nn.Parameter(self.classifier, requires_grad=False)
 
@@ -364,4 +365,4 @@ class SimplexClassifier(nn.Module):
         return ds
 
     def forward(self, x, **kwargs):
-        return x @ self.classifier
+        return self.projector(x) @ self.classifier
