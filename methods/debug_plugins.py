@@ -5,8 +5,6 @@ from copy import deepcopy
 
 import torch
 from avalanche.core import SupervisedPlugin, Template, CallbackResult
-from avalanche.training import ExperienceBalancedBuffer, ClassBalancedBuffer, \
-    Replay
 from avalanche.training.plugins import ReplayPlugin
 from avalanche.training.templates import SupervisedTemplate
 from torch.utils.data import DataLoader
@@ -208,6 +206,18 @@ class TrainDebugPlugin(SupervisedPlugin, supports_distributed=True):
         with open(self.saving_path2, 'wb') as f:
             pickle.dump(self.after_task_history, f)
 
+    def before_training_exp(self, strategy: Template, *args, **kwargs):
+        dataset = strategy.experience.current_experience
+        self.all_dataset.append(dataset)
+
+    def before_training_epoch(
+        self, strategy: Template, *args, **kwargs
+    ) -> CallbackResult:
+
+        tid = strategy.experience.current_experience
+        res = self.update_logits(strategy, self.replay_buffer)
+        self.history[tid] = res
+
     def after_train_dataset_adaptation(
         self, strategy: Template, *args, **kwargs
     ) -> CallbackResult:
@@ -224,35 +234,6 @@ class TrainDebugPlugin(SupervisedPlugin, supports_distributed=True):
 
         with open(self.saving_path2, 'wb') as f:
             pickle.dump(self.after_task_history, f)
-    #
-    # def before_training_exp(self, strategy: Template, *args, **kwargs):
-    #     dataset = strategy.experience.current_experience
-    #     self.all_dataset.append(dataset)
-    #
-    #     tid = strategy.experience.current_experience
-    #     res = self.update_logits(strategy, self.replay_buffer)
-    #     self.after_task_history[tid] = res
-    #
-    #     with open(self.saving_path, 'wb') as f:
-    #         pickle.dump(self.history, f)
-    #
-    #     with open(self.saving_path2, 'wb') as f:
-    #         pickle.dump(self.after_task_history, f)
-    #
-    # def after_training_epoch(
-    #         self, strategy: Template, *args, **kwargs
-    # ) -> CallbackResult:
-    #     if strategy.experience.current_experience == 0:
-    #         return
-    #     tid = strategy.experience.current_experience
-    #
-    #     res = self.update_logits(strategy, self.replay_buffer)
-    #     self.history[tid].append(res)
-    #
-    # def before_training_epoch(
-    #     self, strategy: Template, *args, **kwargs
-    # ) -> CallbackResult:
-    #     a = 0
 
     @torch.no_grad()
     def update_logits(self, strategy, dataset):

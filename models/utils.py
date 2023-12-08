@@ -240,15 +240,11 @@ class ScaledClassifier(MultiTaskModule):
         self.future_layers = None
         if future_classes is not None and future_classes > 0:
             self.future_layers = nn.Linear(self.in_features, future_classes)
-            # self.future_layers = torch.nn.ModuleList(
-            #     [nn.Linear(self.in_features, 1)
-            #      for _ in range(future_classes)])
 
     def adaptation(self, experience: CLExperience):
         super().adaptation(experience)
         device = self._adaptation_device
         curr_classes = experience.classes_in_this_experience
-        task_labels = experience.task_labels
 
         if self.past_scaling_heads is not None and \
                 len(self.past_scaling_heads) > 0 and self.reset_scalers:
@@ -267,28 +263,8 @@ class ScaledClassifier(MultiTaskModule):
             if tid not in self.classifiers:  # create new head
                 past_classifiers = len(self.classifiers)
 
-                # for t in range(len(self.classifiers)):
-                # for p in self.classifiers.parameters():
-                #     p.requires_grad_(False)
-
                 new_head = nn.Linear(self.in_features, len(curr_classes)).to(
                     device)
-
-                # if (self.future_layers is not None and
-                #         len(self.future_layers) > 0):
-                #     w = torch.cat([f.weight for f in self.future_layers], 0)
-                #     b = torch.cat([f.bias for f in self.future_layers], 0)
-                #
-                #     w = w[:len(curr_classes)]
-                #     b = b[:len(curr_classes)]
-                #     new_head.weight[:len(w)] = w
-                #     new_head.bias[:len(b)] = b
-
-                # for i in range(len(w)):
-                #     self.future_layers[i] = nn.Linear(self.in_features, 1)
-
-                # if td > 0:
-                #     init.constant_(new_head.bias, -2.5)
 
                 self.classifiers[tid] = new_head
 
@@ -313,9 +289,6 @@ class ScaledClassifier(MultiTaskModule):
         with torch.no_grad():
             if self.future_layers is not None and self.training:
                 self.future_layers.reset_parameters()
-                # future = nn.Linear(self.in_features, self.future_classes)
-                # future = future.to(self._stop.device)
-                # future = [f(x) for f in self.future_layers]
                 future = self.future_layers(x)
 
         return logits, future
