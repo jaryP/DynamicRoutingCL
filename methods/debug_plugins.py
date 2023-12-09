@@ -200,6 +200,10 @@ class TrainDebugPlugin(SupervisedPlugin, supports_distributed=True):
         self.all_dataset = []
 
     def after_training_exp(self, strategy: Template, *args, **kwargs):
+        tid = strategy.experience.current_experience
+        res = self.update_logits(strategy, self.replay_buffer)
+        self.history[tid] = res
+
         with open(self.saving_path, 'wb') as f:
             pickle.dump(self.history, f)
 
@@ -216,24 +220,24 @@ class TrainDebugPlugin(SupervisedPlugin, supports_distributed=True):
 
         tid = strategy.experience.current_experience
         res = self.update_logits(strategy, self.replay_buffer)
-        self.history[tid] = res
+        self.history[tid].append(res)
 
-    def after_train_dataset_adaptation(
-        self, strategy: Template, *args, **kwargs
-    ) -> CallbackResult:
-
-        dataset = strategy.experience.current_experience
-        self.all_dataset.append(dataset)
-
-        tid = strategy.experience.current_experience
-        res = self.update_logits(strategy, self.replay_buffer)
-        self.after_task_history[tid] = res
-
-        with open(self.saving_path, 'wb') as f:
-            pickle.dump(self.history, f)
-
-        with open(self.saving_path2, 'wb') as f:
-            pickle.dump(self.after_task_history, f)
+    # def after_train_dataset_adaptation(
+    #     self, strategy: Template, *args, **kwargs
+    # ) -> CallbackResult:
+    #
+    #     dataset = strategy.experience.current_experience
+    #     self.all_dataset.append(dataset)
+    #
+    #     tid = strategy.experience.current_experience
+    #     res = self.update_logits(strategy, self.replay_buffer)
+    #     self.after_task_history[tid] = res
+    #
+    #     with open(self.saving_path, 'wb') as f:
+    #         pickle.dump(self.history, f)
+    #
+    #     with open(self.saving_path2, 'wb') as f:
+    #         pickle.dump(self.after_task_history, f)
 
     @torch.no_grad()
     def update_logits(self, strategy, dataset):
@@ -242,7 +246,7 @@ class TrainDebugPlugin(SupervisedPlugin, supports_distributed=True):
         res = {}
         for i, d in enumerate(self.all_dataset):
             dataloader = DataLoader(strategy.experience.dataset,
-                                    batch_size=32)
+                                    batch_size=256, shuffle=False)
 
             all_logits = []
             all_probs = []
