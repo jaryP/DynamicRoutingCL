@@ -594,6 +594,7 @@ class Margin(SupervisedTemplate):
     def _after_eval_forward(self, **kwargs):
         self.mb_output, self.future_logits = self.mb_output
         self.mb_output = torch.cat(self.mb_output, -1)
+        super()._after_eval_forward(**kwargs)
 
     def _after_training_iteration(self, **kwargs):
         super()._after_training_iteration(**kwargs)
@@ -803,6 +804,8 @@ class Margin(SupervisedTemplate):
             self.model.train()
 
     def _before_training_epoch(self, **kwargs):
+        super()._before_training_epoch(**kwargs)
+
         tid = self.experience.current_experience
         if tid == 0:
             return

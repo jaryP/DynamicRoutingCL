@@ -167,7 +167,7 @@ class GradientsDebugPlugin(SupervisedPlugin, supports_distributed=True):
         strategy.model.zero_grad()
 
 
-class TrainDebugPlugin(SupervisedPlugin, supports_distributed=True):
+class TrainDebugPlugin(SupervisedPlugin):
     def __init__(
             self,
             saving_path,
@@ -197,12 +197,14 @@ class TrainDebugPlugin(SupervisedPlugin, supports_distributed=True):
         self.eval_saving_path = os.path.join(saving_path, 'eval_scores.pkl')
         os.makedirs(saving_path, exist_ok=True)
 
-        self.all_dataset = []
+        self.all_dataset = {}
 
     def after_training_exp(self, strategy: Template, *args, **kwargs):
         tid = strategy.experience.current_experience
         res = self.update_logits(strategy, self.replay_buffer)
-        self.history[tid] = res
+
+        self.history[tid].append(res)
+        self.after_task_history[tid] = res
 
         with open(self.saving_path, 'wb') as f:
             pickle.dump(self.history, f)
@@ -210,13 +212,22 @@ class TrainDebugPlugin(SupervisedPlugin, supports_distributed=True):
         with open(self.saving_path2, 'wb') as f:
             pickle.dump(self.after_task_history, f)
 
-    def before_training_exp(self, strategy: Template, *args, **kwargs):
-        dataset = strategy.experience.current_experience
-        self.all_dataset.append(dataset)
+    # def before_training_exp(self, strategy: Template, *args, **kwargs):
+    #     dataset = strategy.experience.dataset
+    #     self.all_dataset.append(dataset)
+
+    def after_eval_dataset_adaptation(self, strategy: Template, *args, **kwargs) -> CallbackResult:
+        tid = strategy.experience.current_experience
+        if tid not in self.all_dataset:
+            self.all_dataset[tid] = strategy.experience.dataset
+        # if tid >= len(self.all_dataset):
+        #     self.all_dataset.append(strategy.experience.dataset)
 
     def before_training_epoch(
         self, strategy: Template, *args, **kwargs
     ) -> CallbackResult:
+        if len(self.all_dataset) == 0:
+            return
 
         tid = strategy.experience.current_experience
         res = self.update_logits(strategy, self.replay_buffer)
@@ -244,9 +255,8 @@ class TrainDebugPlugin(SupervisedPlugin, supports_distributed=True):
         strategy.model.eval()
 
         res = {}
-        for i, d in enumerate(self.all_dataset):
-            dataloader = DataLoader(strategy.experience.dataset,
-                                    batch_size=256, shuffle=False)
+        for i, d in self.all_dataset.items():
+            dataloader = DataLoader(d, batch_size=256, shuffle=False)
 
             all_logits = []
             all_probs = []

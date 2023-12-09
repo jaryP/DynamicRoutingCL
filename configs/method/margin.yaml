@@ -1,4 +1,4 @@
-_target_: methods.margin.Margin
+_target_: methods.Margin
 mem_size: null
 past_task_reg: 0.1
 margin: 1

@@ -3,15 +3,6 @@ import pickle
 import matplotlib.pyplot as plt
 import numpy as np
 import matplotlib.gridspec as grid_spec
-# import pandas as pd
-# import seaborn
-
-# plt.rcParams['text.latex.unicode']=True
-
-# plt.rcParams.update({
-#     "text.usetex": True,
-#     "font.family": "Helvetica"
-# })
 
 plt.rcParams['text.usetex'] = True
 # plt.rcParams['text.latex.preamble'] = [r'\usepackage{amsmath}']
@@ -23,6 +14,87 @@ with open(os.path.join(path, 'logits.pkl'), 'rb') as f:
 
 with open(os.path.join(path, 'after_logits.pkl'), 'rb') as f:
     initial_results = pickle.load(f)
+
+
+fig = plt.figure(figsize=(8, 6))
+gs = (grid_spec.GridSpec(5,1))
+ax_objs = []
+
+# for i in range(5):
+#     r = results[i][-1][0]
+#     r = np.asarray(r[1])
+#     r = np.pad(r, (0, 10 - r.shape[1]))
+#     ax_objs.append(fig.add_subplot(gs[i:i+1, 0:]))
+#
+#     ax_objs[-1].bar(range(10), r.mean(0))
+#
+#     i += 1
+#
+#     # rect = ax_objs[-1].patch
+#     # rect.set_alpha(0)
+#     #
+#     # ax_objs[-1].set_yticklabels([])
+#     # ax_objs[-1].set_ylabel('')
+#     # ax_objs[-1].set_yticklabels([])
+#     # ax_objs[-1].set_ylabel('')
+#     #
+#     # spines = ["top", "right", "left", "bottom"]
+#     # for s in spines:
+#     #     ax_objs[-1].spines[s].set_visible(False)
+#     # ax_objs[-1].text(-0.02, 0, f'Task {i}', fontweight="bold", fontsize=14,
+#     #                  ha="center")
+
+# for a in ax_objs:
+#     a.set_xticklabels([])
+#     # a.set_yticklabels([])
+#
+# plt.subplots_adjust(wspace=0, hspace=0)
+#
+# # gs.update(hspace= -0.5)
+# # gs.update(hspace= -0.2)
+# # plt.tight_layout()
+# plt.show()
+# exit()
+
+max_len = (len(results[0]) - 1) * (len(results) - 1)
+f, ax = plt.subplots(1, 1, figsize=(8,6))
+for t in results:
+    diffs = []
+    for task, epochs in results.items():
+        if task <= t:
+            continue
+        labels = epochs[0][t][2]
+        mx = max(labels)
+
+        probs = np.asarray([e[t][1] for e in epochs])
+        initial_prob, probs = probs[0], probs[1:]
+        # correct_prob = np.take_along_axis(probs, labels[None, :, None], 2).squeeze(-1)
+        # future_max_prob = probs[:, :, mx+1:].max(-1)
+
+        # distance = correct_prob - future_max_prob
+        distance = np.sum(np.where(initial_prob != 0, initial_prob * np.log(initial_prob / probs), 0), -1)
+
+        # initial_distance, distance = distance[0], distance[1:]
+        # distance = initial_distance - distance
+
+        diffs.extend(distance)
+        # s, probs = probs[0], probs[1:]
+        # diff = s - probs
+
+    if len(diffs) == 0:
+        continue
+    diffs = np.asarray(diffs)
+    mn = diffs.mean(1)
+    std = diffs.std(1)
+    
+    print(t, task)
+    x = range(max_len - len(diffs), max_len)
+    plt.plot(x, mn)
+    plt.fill_between(x, mn - std, mn + std, alpha=0.1)
+    # break
+
+plt.show()
+exit()
 
 # fig = plt.figure(figsize=(8,6))
 f, ax = plt.subplots(1, 1, figsize=(8,6))
