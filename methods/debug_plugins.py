@@ -265,8 +265,11 @@ class TrainDebugPlugin(SupervisedPlugin):
             for x, y, t in dataloader:
                 x = x.to(strategy.device)
 
-                pred, _ = strategy.model(x)
-                pred = torch.cat(pred, -1)
+                pred = strategy.model(x)
+                if isinstance(pred, tuple):
+                    pred, _ = pred
+                    pred = torch.cat(pred, -1)
+
                 all_logits.append(pred)
 
                 all_probs.append(torch.softmax(pred, -1))

@@ -17,7 +17,7 @@ der)
         while (( ${num_jobs@P} >= $((max_jobs + 0)) )); do
           wait -n
         done
-        python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=der device=$DEVICE method.alpha=$alpha method.beta=$beta experiment=dev method.mem_size=$memory hydra=search head=linear +wadnb_tags=[grid_search] &
+        python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=der device=$DEVICE method.alpha=$alpha method.beta=$beta experiment=dev method.mem_size=$memory hydra=search head=linear +wadnb_tags=[grid_search] head.out_features=200 &
       done
     done
   done

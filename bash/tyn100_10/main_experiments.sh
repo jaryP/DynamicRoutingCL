@@ -59,7 +59,7 @@ ssil)
   python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=ssil optimizer=sgd method.mem_size=$memory device="$DEVICE" training.epochs=100
   done
 ;;
-er_ece)
+er_ace)
   for memory in 200 500 1000 2000
   do
     python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=er_ace method.mem_size=$memory optimizer=sgd  device="$DEVICE"

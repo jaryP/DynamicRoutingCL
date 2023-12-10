@@ -74,6 +74,12 @@ der)
   python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=der method.mem_size=1000  device=$DEVICE +model.head_classes=100 method.alpha=0.5 method.beta=0.1 head=linear
   python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=der method.mem_size=2000  device=$DEVICE +model.head_classes=100 method.alpha=0.2 method.beta=0.8 head=linear
 ;;
+logit_d)
+  python main.py +scenario=cil_cifar10_5 model=$MODEL +training=cifar10_5 +method=logit_d device=$DEVICE method.mem_size=200 method.alpha=0.1 head=incremental
+  python main.py +scenario=cil_cifar10_5 model=$MODEL +training=cifar10_5 +method=logit_d device=$DEVICE method.mem_size=500 method.alpha=0.1 head=incremental
+  python main.py +scenario=cil_cifar10_5 model=$MODEL +training=cifar10_5 +method=logit_d device=$DEVICE method.mem_size=1000 method.alpha=0.1 head=incremental
+  python main.py +scenario=cil_cifar10_5 model=$MODEL +training=cifar10_5 +method=logit_d device=$DEVICE method.mem_size=2000 method.alpha=0.1 head=incremental
+;;
 #cope)
 #  python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=cope   device="$DEVICE" hydra.run.dir='./results/ci_cifar10/"$MODEL"/cope/cope_500'
 #;;

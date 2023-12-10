@@ -313,7 +313,8 @@ def avalanche_training(cfg: DictConfig):
                 if plugin_name =='replay':
                     debug_plugins = [LogitsDebugPlugin(debug_path)]
                 if plugin_name =='der':
-                    debug_plugins = [GradientsDebugPlugin(debug_path)]
+                    # debug_plugins = [TrainDebugPlugin(de), GradientsDebugPlugin(debug_path)]
+                    debug_plugins = [TrainDebugPlugin(debug_path)]
                 if plugin_name =='margin':
                     debug_plugins = [TrainDebugPlugin(debug_path)]
 

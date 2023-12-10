@@ -76,7 +76,7 @@ logit_d)
       while (( ${num_jobs@P} >= ${max_jobs:-1} )); do
         wait -n
       done
-      python main.py +scenario=cil_cifar10_5 model=$MODEL +training=cifar10_5 +method=logit_d device=$DEVICE method.mem_size=$memory method.alpha=$alpha hydra=search experiment=dev head=incremental &
+      python main.py +scenario=cil_cifar10_5 model=$MODEL +training=cifar10_5 +method=logit_d device=$DEVICE method.mem_size=$memory method.alpha=$alpha hydra=search experiment=dev head=incremental +wadnb_tags=[grid_search] &
     done
   done
 ;;
