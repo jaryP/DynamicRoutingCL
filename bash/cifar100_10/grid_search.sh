@@ -34,6 +34,18 @@ do
   done
 done
 ;;
+logit_d)
+  for memory in 200 500 1000 2000
+  do
+    for alpha in 0.1 0.25 0.5 0.75 1
+    do
+      while (( ${num_jobs@P} >= ${max_jobs:-1} )); do
+        wait -n
+      done
+      python main.py +scenario=cil_cifar100_10 model=$MODEL +training=cifar100 +method=logit_d device=$DEVICE method.mem_size=$memory method.alpha=$alpha hydra=search experiment=dev head=incremental +wadnb_tags=[grid_search] &
+    done
+  done
+;;
 #ewc)
 #  for lambda in 1 10 100 1000
 #  do

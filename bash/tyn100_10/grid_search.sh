@@ -17,7 +17,7 @@ der)
         while (( ${num_jobs@P} >= $((max_jobs + 0)) )); do
           wait -n
         done
-        python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=der device=$DEVICE method.alpha=$alpha method.beta=$beta experiment=dev method.mem_size=$memory hydra=search head=linear +wadnb_tags=[grid_search] head.out_features=200 &
+        python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=der device=$DEVICE method.alpha=$alpha method.beta=$beta experiment=dev method.mem_size=$memory hydra=search head=linear +wadnb_tags=[grid_search] head.out_features=200 &
       done
     done
   done
@@ -30,9 +30,21 @@ do
     while (( ${num_jobs@P} >= $((max_jobs + 0)) )); do
       wait -n
     done
-    python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=margin head=margin_head device=$DEVICE method.mem_size=$memory method.past_task_reg=$past_margin_w method.gamma=1 +method.alpha=0 +wadnb_tags=[grid_search_margin] method.margin_type=adaptive +method.rehearsal_metric='kl' experiment=dev hydra=search &
+    python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=margin head=margin_head device=$DEVICE method.mem_size=$memory method.past_task_reg=$past_margin_w method.gamma=1 +method.alpha=0 +wadnb_tags=[grid_search_margin] method.margin_type=adaptive +method.rehearsal_metric='kl' experiment=dev hydra=search &
   done
 done
+;;
+logit_d)
+  for memory in 200 500 1000 2000
+  do
+    for alpha in 0.1 0.25 0.5 0.75 1
+    do
+      while (( ${num_jobs@P} >= ${max_jobs:-1} )); do
+        wait -n
+      done
+      python main.py +scenario=cil_tyn_10 model=$MODEL +training=tinyimagenet +method=logit_d device=$DEVICE method.mem_size=$memory method.alpha=$alpha hydra=search experiment=dev head=incremental +wadnb_tags=[grid_search] &
+    done
+  done
 ;;
 #ewc)
 #  for lambda in 1 10 100 1000

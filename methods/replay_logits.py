@@ -47,9 +47,9 @@ class LogitDistillationPlugin(SupervisedPlugin, supports_distributed=True):
         px = px.to(x.device)
 
         with torch.no_grad():
-            pl = self.past_model(px, pt)
+            pl = self.past_model(px, task_labels=pt)
 
-        cl = strategy.model(px, pt)
+        cl = strategy.model(px, task_labels=pt)
         past_reg_loss = nn.functional.kl_div(
             torch.log_softmax(cl, -1),
             torch.softmax(pl, -1), reduction='batchmean')

@@ -9,11 +9,12 @@ plt.rcParams['text.usetex'] = True
 # plt.rcParams['text.latex.preamble'] = [r'\usepackage{amsmath}']
 
 path = '/media/jary/Data/progetti/DynamicModelCL/cifar10/no_test_bias/0/debug_logits'
-paths = [path,
-         '/media/jary/Data/progetti/DynamicModelCL/cifar10/plot_probs/0/logits/']
+paths = ['/media/jary/Data/progetti/DynamicModelCL/cifar10/no_test_bias/0/debug_logits',
+         '/media/jary/Data/progetti/DynamicModelCL/cifar10/plot_probs/0/logits/',
+         '/media/jary/Data/progetti/DynamicModelCL/cifar10/_provadist_logits/0/debug_logits']
 
-markers = ['x', 's']
-legends = ['Our proposal', 'DER']
+markers = ['x', 's', '^']
+legends = ['Our proposal', 'DER','LD']
 
 f, axs = plt.subplots(4, 1, figsize=(8, 6))
 
@@ -37,8 +38,9 @@ for pi, p in enumerate(paths):
             # future_max_prob = probs[:, :, mx+1:].max(-1)
 
             # distance = correct_prob - future_max_prob
-            distance = np.sum(np.where(initial_prob != 0, initial_prob * np.log(
-                initial_prob / probs), 0), -1)
+            d = initial_prob * np.log(initial_prob / probs)
+            d[np.logical_or(np.isinf(d), np.isnan(d))] = 0.0
+            distance = np.sum(d, -1)
 
             # initial_distance, distance = distance[0], distance[1:]
             # distance = initial_distance - distance

@@ -239,7 +239,7 @@ def avalanche_training(cfg: DictConfig):
                 elif plugin_name == 'der':
                     assert isinstance(head, torch.nn.Linear)
 
-                if plugin_name in ['margin', 'incrementalmargin', 'der']:
+                if plugin_name in ['margin', 'incrementalmargin', 'der', 'logitdistillation']:
                     model = PytorchCombinedModel(backbone, head)
                 else:
                     model = AvalanceCombinedModel(backbone, head)
@@ -310,12 +310,12 @@ def avalanche_training(cfg: DictConfig):
             debug_plugins = []
             if cfg.get('debug_path', None) is not None:
                 debug_path = os.path.join(experiment_path, cfg.debug_path)
-                if plugin_name =='replay':
+                if plugin_name == 'replay':
                     debug_plugins = [LogitsDebugPlugin(debug_path)]
-                if plugin_name =='der':
+                if plugin_name == 'der':
                     # debug_plugins = [TrainDebugPlugin(de), GradientsDebugPlugin(debug_path)]
                     debug_plugins = [TrainDebugPlugin(debug_path)]
-                if plugin_name =='margin':
+                if plugin_name == 'margin' or 'logitdistillation' == plugin_name:
                     debug_plugins = [TrainDebugPlugin(debug_path)]
 
             if cfg is not None and '_target_' in cfg.method:
