@@ -218,7 +218,7 @@ class ScaledClassifier(MultiTaskModule):
             scale_each_class=True,
             scale=True,
             reset_scalers=False,
-            a=10, b=1,
+            beta=10, gamma=1,
     ):
         super().__init__()
 
@@ -227,8 +227,8 @@ class ScaledClassifier(MultiTaskModule):
 
         self.past_scaling_heads = torch.nn.ModuleDict() if scale else None
 
-        self.a = a
-        self.b = b
+        self.beta = beta
+        self.gamma = gamma
 
         self.classes_seen_so_far = []
 
@@ -278,7 +278,7 @@ class ScaledClassifier(MultiTaskModule):
         logits = [c(x) for c in self.classifiers.values()]
 
         if len(logits) > 1 and self.past_scaling_heads is not None:
-            scalers = [[torch.sigmoid(self.b * s(x) + self.a) for s in v]
+            scalers = [[torch.sigmoid(self.gamma * s(x) + self.beta) for s in v]
                        for v in self.past_scaling_heads.values()]
 
             for i, (l, sig) in enumerate(zip(logits[1:], scalers)):

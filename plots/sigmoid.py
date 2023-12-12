@@ -141,8 +141,8 @@ summary_list, config_list, name_list = [], [], []
 for run in runs:
     # .summary contains the output keys/values for metrics like accuracy.
     #  We call ._json_dict to omit large files
-    acc_results[run.config['head']['a']][run.config['head']['b']] = run.summary['Top1_Acc_Stream/eval_phase/test_stream/Task000']
-    bwt_results[run.config['head']['a']][run.config['head']['b']] = run.summary['StreamBWT/eval_phase/test_stream']
+    acc_results[run.config['head']['beta']][run.config['head']['gamma']] = run.summary['Top1_Acc_Stream/eval_phase/test_stream/Task000']
+    bwt_results[run.config['head']['beta']][run.config['head']['gamma']] = run.summary['StreamBWT/eval_phase/test_stream']
 
 a_vals = sorted(acc_results.keys(), reverse=False)
 b_vals = sorted(acc_results[a_vals[0]].keys(), reverse=False)
