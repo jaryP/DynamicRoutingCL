@@ -6,7 +6,7 @@ DEVICE=$3
 
 case $METHOD in
 gem)
-  for memory in 200 500 1000 2000
+  for memory in 200 500 1000 2000 5000
   do
     python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=gem method.patterns_per_exp=$memory  optimizer=sgd  device="$DEVICE"
   done
@@ -42,13 +42,13 @@ cumulative)
 #  python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=icarl_2000 optimizer=sgd  device="$DEVICE"
 #;;
 replay)
-  for memory in 200 500 1000 2000
+  for memory in 200 500 1000 2000 5000
   do
   python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=replay optimizer=sgd method.mem_size=$memory  device="$DEVICE"
   done
 ;;
 rpc)
-  for memory in 200 500 1000 2000
+  for memory in 200 500 1000 2000 5000
   do
   python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=replay optimizer=sgd method.mem_size=$memory device="$DEVICE" head=simplex
   done
@@ -60,20 +60,25 @@ ssil)
   done
 ;;
 er_ace)
-  for memory in 200 500 1000 2000
+  for memory in 200 500 1000 2000 5000
   do
     python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=er_ace method.mem_size=$memory optimizer=sgd  device="$DEVICE"
   done
 ;;
 gdumb)
-  for memory in 200 500 1000 2000
+  for memory in 200 500 1000 2000 5000
   do
     python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=gdumb method.mem_size=$memory optimizer=sgd  device="$DEVICE"
   done
 ;;
-#cope)
-#  python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=cope optimizer=sgd  device="$DEVICE" hydra.run.dir='./results/ci_cifar10/"$MODEL"/cope/cope_500'
+#logit_d)
+#  python main.py +scenario=cil_tyn_10 model=$MODEL +training=tinyimagenet +method=cifar100 device=$DEVICE method.mem_size=200 method.alpha=1 head=incremental
+#  python main.py +scenario=cil_tyn_10 model=$MODEL +training=tinyimagenet +method=cifar100 device=$DEVICE method.mem_size=500 method.alpha=1 head=incremental
+#  python main.py +scenario=cil_tyn_10 model=$MODEL +training=tinyimagenet +method=cifar100 device=$DEVICE method.mem_size=1000 method.alpha=0.75 head=incremental
+#  python main.py +scenario=cil_tyn_10 model=$MODEL +training=tinyimagenet +method=cifar100 device=$DEVICE method.mem_size=2000 method.alpha=0.75 head=incremental
 #;;
 *)
   echo -n "Unrecognized method"
 esac
+
+#2107689

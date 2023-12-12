@@ -49,14 +49,14 @@ logit)
   done
 ;;
 sigmoid)
-  for a in 0 1 2.5 5 10 20
+  for beta in 0 1 2.5 5 10 20
   do
-    for b in 1 0.5 1 2.5 5
+    for gamma in 1 0.5 1 2.5 5
     do
       while (( ${num_jobs@P} >= ${max_jobs:-1} )); do
         wait -n
       done
-      python main.py +scenario=cil_cifar10_5 model=$MODEL +training=cifar10_5 +method=margin device=$DEVICE method.mem_size=500 method.past_task_reg=0.25 +model.regularize_logits=True method.gamma=1 hydra=search +wadnb_tags=[margin_simgoid_ablation] head=margin_head head.a=$a head.b=$b experiment=base2 &
+      python main.py +scenario=cil_cifar10_5 model=$MODEL +training=cifar10_5 +method=margin device=$DEVICE method.mem_size=500 method.past_task_reg=0.25 +model.regularize_logits=True method.gamma=1 hydra=search +wadnb_tags=[margin_simgoid_ablation] head=margin_head head.gamma=$gamma head.beta=$beta experiment=base2 &
     done
   done
 ;;
