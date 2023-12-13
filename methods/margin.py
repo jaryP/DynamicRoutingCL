@@ -389,20 +389,11 @@ class _Margin(SupervisedTemplate):
             loss = nn.functional.cross_entropy(pred, self.mb_y,
                                                label_smoothing=0)
         else:
-            # ce_loss = 0
-            # margin_loss = 0
-            # margin_den = 0
-            # ce_den = 0
-
             y = self.mb_y
             past_classes = len(self.past_dataset)
 
             distr = torch.cat(self.mb_output, -1)
 
-            # if self.regularize_logits:
-            #     mx_current_classes = distr[range(len(co)), y]
-            #     past_max = distr[:, :past.shape[-1]].max(-1).values
-            # else:
             distr = torch.softmax(distr, -1)
 
             mx_current_classes = distr[range(len(distr)), y]
@@ -428,10 +419,6 @@ class _Margin(SupervisedTemplate):
                 past_max - mx_current_classes + margin)
 
             margin_loss = margin_dist.mean()
-
-            # if self.future_logits is not None:
-            #     # with torch.no_grad():
-            #     co = torch.cat((co, self.future_logits), -1)
 
             ce_loss = nn.functional.cross_entropy(self.mb_output[tid], y,
                                                   reduction='mean')
@@ -849,7 +836,6 @@ class Margin(SupervisedTemplate):
         if len(self.past_dataset) == 0:
             pred = torch.cat(self.mb_output, -1)
             if self.future_logits is not None:
-                # with torch.no_grad():
                 pred = torch.cat((pred, self.future_logits), -1)
 
             loss = nn.functional.cross_entropy(pred, self.mb_y,
@@ -860,15 +846,13 @@ class Margin(SupervisedTemplate):
             margin_den = 0
             ce_den = 0
 
-            bs = len(self.mb_x)
-
             for t in torch.unique(self.mb_task_id):
                 if t < tid and self.alpha <= 0:
                     continue
-                    # loss = loss * self.alpha
 
                 mask = self.mb_task_id == t
                 ce_den += mask.sum().item()
+                ce_m = None
 
                 y = self.mb_y[mask]
                 co = torch.cat(self.mb_output[t.item():], -1)[mask]
@@ -886,6 +870,12 @@ class Margin(SupervisedTemplate):
 
                         mx_current_classes = distr[range(len(co)), y]
                         past_max = distr[:, :past.shape[-1]].max(-1).values
+
+
+                    m = nn.functional.one_hot(y, distr.shape[-1])
+                    nm = 1 - m
+                    pm = (distr * nm).max(-1).values
+                    ce_m = pm > mx_current_classes
 
                     y = y - past.shape[-1]
 
@@ -909,16 +899,12 @@ class Margin(SupervisedTemplate):
 
                     margin_loss = margin_dist.mean()
 
-                    # if den_mask.sum() > 0:
-                    #     margin_den += den_mask.sum()
-                    #     past_reg = margin_dist[den_mask].sum()
-                    #
-                    #     margin_loss += past_reg
-
                 if self.future_logits is not None:
-                    # with torch.no_grad():
                     co = torch.cat((co, self.future_logits[mask]), -1)
 
+                # if ce_m is not None:
+                #     loss = nn.functional.cross_entropy(co[ce_m], y[ce_m], reduction='sum')
+                # else:
                 loss = nn.functional.cross_entropy(co, y, reduction='sum')
 
                 if t < tid:
