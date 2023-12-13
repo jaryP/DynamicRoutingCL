@@ -63,7 +63,7 @@ sigmoid)
 tradeoff)
 for memory in 200 500 1000 2000 4000 6000 10000
 do
-  for past_margin_w in 1 0.75 0.5 0.25 0.1 0.05 0.025 0.01
+  for past_margin_w in 0.5 0.25 0.1 0.05 0.025 0.01 1 0.75
   do
     while (( ${num_jobs@P} >= ${max_jobs:-1} )); do
       wait -n
