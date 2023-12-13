@@ -28,15 +28,28 @@ margin_type)
   done
 ;;
 scaler)
-  for memory in 200 500 1000 2000
+  memory_list=(200 500 1000 2000)
+  reg_list=(0.1 0.25 0.25 0.5)
+  for i in "${!memory_list[@]}"
   do
-    while (( ${num_jobs@P} >= ${max_jobs:-1} )); do
-      wait -n
-    done
-    python main.py +scenario=cil_cifar10_5 model=$MODEL +training=cifar10_5 +method=margin device=$DEVICE method.mem_size=$memory method.past_task_reg=0.25 method.gamma=1 hydra=search +wadnb_tags=[margin_scale_ablation] head=margin_head +head.scale=False experiment=base2 &
-    python main.py +scenario=cil_cifar10_5 model=$MODEL +training=cifar10_5 +method=margin device=$DEVICE method.mem_size=$memory method.past_task_reg=0.25 method.gamma=1 hydra=search +wadnb_tags=[margin_scale_single_ablation] head=margin_head +head.scale=False +head.scale_each_class=False experiment=base2 &
-    python main.py +scenario=cil_cifar10_5 model=$MODEL +training=cifar10_5 +method=margin device=$DEVICE method.mem_size=$memory method.past_task_reg=0.25 method.gamma=1 hydra=search +wadnb_tags=[margin_scale_rest_ablation] head=margin_head +head.scale=False +head.reset_scalers=True experiment=base2 &
+    memory=${memory_list[i]}
+    reg=${reg_list[i]}
+
+    python main.py +scenario=cil_cifar10_5 model=$MODEL +training=cifar10_5 +method=margin device=$DEVICE method.mem_size=$memory method.past_task_reg=$reg method.gamma=1 hydra=search +wadnb_tags=[margin_scale_ablation] head=margin_head +head.scale=False experiment=base2 &
+    python main.py +scenario=cil_cifar10_5 model=$MODEL +training=cifar10_5 +method=margin device=$DEVICE method.mem_size=$memory method.past_task_reg=$reg method.gamma=1 hydra=search +wadnb_tags=[margin_scale_single_ablation] head=margin_head +head.scale=False +head.scale_each_class=False experiment=base2 &
+    python main.py +scenario=cil_cifar10_5 model=$MODEL +training=cifar10_5 +method=margin device=$DEVICE method.mem_size=$memory method.past_task_reg=$reg method.gamma=1 hydra=search +wadnb_tags=[margin_scale_rest_ablation] head=margin_head +head.scale=False +head.reset_scalers=True experiment=base2 &
   done
+#  for memory in 200 500 1000 2000
+#  do
+#    while (( ${num_jobs@P} >= ${max_jobs:-1} )); do
+#      wait -n
+#    done
+#
+#
+#    python main.py +scenario=cil_cifar10_5 model=$MODEL +training=cifar10_5 +method=margin device=$DEVICE method.mem_size=$memory method.past_task_reg=0.25 method.gamma=1 hydra=search +wadnb_tags=[margin_scale_ablation] head=margin_head +head.scale=False experiment=base2 &
+#    python main.py +scenario=cil_cifar10_5 model=$MODEL +training=cifar10_5 +method=margin device=$DEVICE method.mem_size=$memory method.past_task_reg=0.25 method.gamma=1 hydra=search +wadnb_tags=[margin_scale_single_ablation] head=margin_head +head.scale=False +head.scale_each_class=False experiment=base2 &
+#    python main.py +scenario=cil_cifar10_5 model=$MODEL +training=cifar10_5 +method=margin device=$DEVICE method.mem_size=$memory method.past_task_reg=0.25 method.gamma=1 hydra=search +wadnb_tags=[margin_scale_rest_ablation] head=margin_head +head.scale=False +head.reset_scalers=True experiment=base2 &
+#  done
 ;;
 future)
   for future_classes in 10 20 30 50
