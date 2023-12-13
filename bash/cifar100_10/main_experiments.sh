@@ -72,10 +72,10 @@ gdumb)
   done
 ;;
 logit_d)
-  python main.py +scenario=cil_cifar100_10 model=$MODEL +training=cifar10_5 +method=cifar100 device=$DEVICE method.mem_size=200 method.alpha=1 head=incremental
-  python main.py +scenario=cil_cifar100_10 model=$MODEL +training=cifar10_5 +method=cifar100 device=$DEVICE method.mem_size=500 method.alpha=1 head=incremental
-  python main.py +scenario=cil_cifar100_10 model=$MODEL +training=cifar10_5 +method=cifar100 device=$DEVICE method.mem_size=1000 method.alpha=0.75 head=incremental
-  python main.py +scenario=cil_cifar100_10 model=$MODEL +training=cifar10_5 +method=cifar100 device=$DEVICE method.mem_size=2000 method.alpha=0.75 head=incremental
+  python main.py +scenario=cil_cifar100_10 model=$MODEL +training=cifar100 +method=logit_d device=$DEVICE method.mem_size=200 method.alpha=1 head=incremental
+  python main.py +scenario=cil_cifar100_10 model=$MODEL +training=cifar100 +method=logit_d device=$DEVICE method.mem_size=500 method.alpha=1 head=incremental
+  python main.py +scenario=cil_cifar100_10 model=$MODEL +training=cifar100 +method=logit_d device=$DEVICE method.mem_size=1000 method.alpha=0.75 head=incremental
+  python main.py +scenario=cil_cifar100_10 model=$MODEL +training=cifar100 +method=logit_d device=$DEVICE method.mem_size=2000 method.alpha=0.75 head=incremental
 ;;
 #cope)
 #  python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=cope optimizer=sgd  device="$DEVICE" hydra.run.dir='./results/ci_cifar10/"$MODEL"/cope/cope_500'
