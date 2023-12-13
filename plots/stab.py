@@ -145,7 +145,7 @@ for run in runs:
     bwt_results[run.config['method']['mem_size']][run.config['method']['past_task_reg']] = run.summary['StreamBWT/eval_phase/test_stream']
 
 mem_sizes = sorted(acc_results.keys(), reverse=False)
-reg_values = sorted(acc_results[mem_sizes[0]].keys(), reverse=False)
+reg_values = sorted(acc_results[mem_sizes[0]].keys(), reverse=False)[1:]
 
 acc_matrix = np.zeros((len(mem_sizes), len(reg_values)))
 bwt_matrix = np.zeros((len(mem_sizes), len(reg_values)))
@@ -158,7 +158,7 @@ for i, m in enumerate(mem_sizes):
 # im = ax.imshow(acc_matrix)
 #
 # # Show all ticks and label them with the respective list entries
-# ax.set_yticks(np.arange(len(mem_sizes)), labels=mem_sizes)
+# ax.set_yticks(np.arange(len(mem_sizes)), labels=m em_sizes)
 # ax.set_xticks(np.arange(len(reg_values)), labels=reg_values)
 #
 # for i in range(len(mem_sizes)):
