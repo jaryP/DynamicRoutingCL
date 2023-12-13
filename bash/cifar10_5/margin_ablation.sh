@@ -28,12 +28,14 @@ margin_type)
   done
 ;;
 scaler)
-  for memory in 200 1000 2000
+  for memory in 200 500 1000 2000
   do
     while (( ${num_jobs@P} >= ${max_jobs:-1} )); do
-    wait -n
+      wait -n
     done
     python main.py +scenario=cil_cifar10_5 model=$MODEL +training=cifar10_5 +method=margin device=$DEVICE method.mem_size=$memory method.past_task_reg=0.25 method.gamma=1 hydra=search +wadnb_tags=[margin_scale_ablation] head=margin_head +head.scale=False training=base2 &
+    python main.py +scenario=cil_cifar10_5 model=$MODEL +training=cifar10_5 +method=margin device=$DEVICE method.mem_size=$memory method.past_task_reg=0.25 method.gamma=1 hydra=search +wadnb_tags=[margin_scale_single_ablation] head=margin_head +head.scale=False +head.scale_each_class=False training=base2 &
+    python main.py +scenario=cil_cifar10_5 model=$MODEL +training=cifar10_5 +method=margin device=$DEVICE method.mem_size=$memory method.past_task_reg=0.25 method.gamma=1 hydra=search +wadnb_tags=[margin_scale_rest_ablation] head=margin_head +head.scale=False +head.reset_scalers=True training=base2 &
   done
 ;;
 future)
