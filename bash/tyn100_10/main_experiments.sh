@@ -21,10 +21,10 @@ gem)
 #  python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=cml_01 optimizer=sgd  device="$DEVICE"
 #;;
 margin)
-python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=margin head=margin_head device=$DEVICE method.mem_size=200 method.past_task_reg=0.05 method.gamma=1 +method.alpha=0 +wadnb_tags=[final_results_margin] method.margin_type=adaptive +method.rehearsal_metric='kl'
-python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=margin head=margin_head device=$DEVICE method.mem_size=500 method.past_task_reg=0.05 method.gamma=1 +method.alpha=0 +wadnb_tags=[final_results_margin] method.margin_type=adaptive +method.rehearsal_metric='kl'
-python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=margin head=margin_head device=$DEVICE method.mem_size=1000 method.past_task_reg=0.05 method.gamma=1 +method.alpha=0 +wadnb_tags=[final_results_margin] method.margin_type=adaptive +method.rehearsal_metric='kl'
-python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=margin head=margin_head device=$DEVICE method.mem_size=2000 method.past_task_reg=0.25 method.gamma=1 +method.alpha=0 +wadnb_tags=[final_results_margin] method.margin_type=adaptive +method.rehearsal_metric='kl'
+python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=margin head=margin_head device=$DEVICE method.mem_size=200 method.past_task_reg=0.05 method.gamma=1 +wadnb_tags=[final_results_margin] method.margin_type=adaptive +method.rehearsal_metric='kl'
+python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=margin head=margin_head device=$DEVICE method.mem_size=500 method.past_task_reg=0.05 method.gamma=1 +wadnb_tags=[final_results_margin] method.margin_type=adaptive +method.rehearsal_metric='kl'
+python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=margin head=margin_head device=$DEVICE method.mem_size=1000 method.past_task_reg=0.05 method.gamma=1 +wadnb_tags=[final_results_margin] method.margin_type=adaptive +method.rehearsal_metric='kl'
+python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=margin head=margin_head device=$DEVICE method.mem_size=2000 method.past_task_reg=0.25 method.gamma=1 +wadnb_tags=[final_results_margin] method.margin_type=adaptive +method.rehearsal_metric='kl'
 ;;
 #der)
 #python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=der_200  device=$DEVICE +model.head_classes=100 method.alpha=0.1 method.beta=0.8 head=linear +wadnb_tags=[final_results]
