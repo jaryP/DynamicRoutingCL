@@ -45,10 +45,10 @@ rpc)
   done
 ;;
 margin)
-  python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=margin method.mem_size=200 head=margin_head method.gamma=1 +method.alpha=0 method.past_task_reg=0.1 +method.rehearsal_metric='kl' method.margin_type=adaptive device="$DEVICE" +wadnb_tags=[final_results_margin]
-  python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=margin method.mem_size=500 head=margin_head method.gamma=1 +method.alpha=0 method.past_task_reg=0.25 +method.rehearsal_metric='kl' method.margin_type=adaptive  device="$DEVICE" +wadnb_tags=[final_results_margin]
-  python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=margin method.mem_size=1000 head=margin_head method.gamma=1 +method.alpha=0 method.past_task_reg=0.25 +method.rehearsal_metric='kl'  device="$DEVICE" +wadnb_tags=[final_results_margin]
-  python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=margin method.mem_size=2000 head=margin_head method.gamma=1 +method.alpha=0 method.past_task_reg=0.5 +method.rehearsal_metric='kl'  device="$DEVICE" +wadnb_tags=[final_results_margin]
+  python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=margin method.mem_size=200 head=margin_head method.gamma=1  method.past_task_reg=0.1  method.margin_type=adaptive device="$DEVICE" +wadnb_tags=[final_results_margin]
+  python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=margin method.mem_size=500 head=margin_head method.gamma=1  method.past_task_reg=0.25  method.margin_type=adaptive  device="$DEVICE" +wadnb_tags=[final_results_margin]
+  python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=margin method.mem_size=1000 head=margin_head method.gamma=1  method.past_task_reg=0.25   device="$DEVICE" +wadnb_tags=[final_results_margin]
+  python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=margin method.mem_size=2000 head=margin_head method.gamma=1  method.past_task_reg=0.5   device="$DEVICE" +wadnb_tags=[final_results_margin]
 ;;
 ssil)
   for memory in +method=margin200 500 1000 2000 

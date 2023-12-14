@@ -21,7 +21,7 @@ margin_type)
         while (( ${num_jobs@P} >= ${max_jobs:-1} )); do
             wait -n
           done
-          python main.py +scenario=cil_cifar100_10 model=$MODEL +training=cifar100 +method=margin device=$DEVICE method.mem_size=$memory method.past_task_reg=$margin_w method.gamma=1 +method.alpha=0 hydra=search +wadnb_tags=[margin_type_ablation] method.margin_type=$margin_type method.margin=$margin head=margin_head &
+          python main.py +scenario=cil_cifar100_10 model=$MODEL +training=cifar100 +method=margin device=$DEVICE method.mem_size=$memory method.past_task_reg=$margin_w method.gamma=1 hydra=search +wadnb_tags=[margin_type_ablation] method.margin_type=$margin_type method.margin=$margin head=margin_head &
         done
       done
     done
@@ -68,7 +68,7 @@ do
     while (( ${num_jobs@P} >= ${max_jobs:-1} )); do
       wait -n
     done
-    python main.py +scenario=cil_cifar100_10 model=$MODEL +training=cifar100 +method=margin_cifar10 device=$DEVICE method.mem_size=$memory method.past_task_reg=$past_margin_w method.gamma=1 +method.alpha=0 hydra=search +wadnb_tags=[sp_to_ablation] method.margin_type=adaptive +method.rehearsal_metric='kl' experiment=base1 head=margin_head &
+    python main.py +scenario=cil_cifar100_10 model=$MODEL +training=cifar100 +method=margin_cifar10 device=$DEVICE method.mem_size=$memory method.past_task_reg=$past_margin_w method.gamma=1 hydra=search +wadnb_tags=[sp_to_ablation] method.margin_type=adaptive  experiment=base1 head=margin_head &
   done
 done
 ;;

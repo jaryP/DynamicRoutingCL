@@ -21,7 +21,7 @@ margin_type)
         while (( ${num_jobs@P} >= ${max_jobs:-1} )); do
             wait -n
           done
-          python main.py +scenario=cil_cifar10_5 model=$MODEL +training=cifar10_5 +method=margin device=$DEVICE method.mem_size=$memory method.past_task_reg=$margin_w method.gamma=1 +method.alpha=0 hydra=search +wadnb_tags=[margin_type_ablation] method.margin_type=$margin_type method.margin=$margin head=margin_head &
+          python main.py +scenario=cil_cifar10_5 model=$MODEL +training=cifar10_5 +method=margin device=$DEVICE method.mem_size=$memory method.past_task_reg=$margin_w method.gamma=1  hydra=search +wadnb_tags=[margin_type_ablation] method.margin_type=$margin_type method.margin=$margin head=margin_head &
         done
       done
     done
@@ -30,6 +30,7 @@ margin_type)
 scaler)
   memory_list=(200 500 1000 2000)
   reg_list=(0.1 0.25 0.25 0.5)
+
   for i in "${!memory_list[@]}"
   do
 #    while (( ${num_jobs@P} >= ${max_jobs:-1} )); do
