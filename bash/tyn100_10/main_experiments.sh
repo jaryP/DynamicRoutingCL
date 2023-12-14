@@ -8,7 +8,7 @@ case $METHOD in
 gem)
   for memory in 200 500 1000 2000 5000
   do
-    python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=gem method.patterns_per_exp=$memory  optimizer=sgd  device="$DEVICE"
+    python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=gem method.patterns_per_exp=$memory  optimizer=sgd  device="$DEVICE" experiment=base2
   done
 ;;
 #ewc)
@@ -56,7 +56,7 @@ rpc)
 ssil)
   for memory in 200 500 1000 2000
   do
-  python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=ssil optimizer=sgd method.mem_size=$memory device="$DEVICE" training.epochs=100
+  python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=ssil optimizer=sgd method.mem_size=$memory device="$DEVICE" training.epochs=100 experiment=base2
   done
 ;;
 er_ace)
