@@ -27,10 +27,10 @@ python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +meth
 python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=margin head=margin_head device=$DEVICE method.mem_size=2000 method.past_task_reg=1 method.gamma=1  +wadnb_tags=[final_results_margin] method.margin_type=adaptive 
 ;;
 der)
-python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=der_200  device=$DEVICE +model.head_classes=100 method.alpha=0.1 method.beta=0.8 head=linear +wadnb_tags=[final_results]
-python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=der_500  device=$DEVICE +model.head_classes=100 method.alpha=0.1 method.beta=1 head=linear +wadnb_tags=[final_results]
-python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=der_1000  device=$DEVICE +model.head_classes=100 method.alpha=0.1 method.beta=0.8 head=linear +wadnb_tags=[final_results]
-python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=der_2000  device=$DEVICE +model.head_classes=100 method.alpha=0.1 method.beta=0.8 head=linear +wadnb_tags=[final_results]
+python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=der  device=$DEVICE +model.head_classes=100 method.alpha=0.1 method.beta=0.8 head=linear +wadnb_tags=[final_results]
+python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=der  device=$DEVICE +model.head_classes=100 method.alpha=0.1 method.beta=1 head=linear +wadnb_tags=[final_results]
+python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=der  device=$DEVICE +model.head_classes=100 method.alpha=0.1 method.beta=0.8 head=linear +wadnb_tags=[final_results]
+python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100 +method=der  device=$DEVICE +model.head_classes=100 method.alpha=0.1 method.beta=0.8 head=linear +wadnb_tags=[final_results]
 ;;
 naive)
   python main.py +scenario=cil_cifar100_10 model="$MODEL" +training=cifar100  +method=naive optimizer=sgd  device="$DEVICE"

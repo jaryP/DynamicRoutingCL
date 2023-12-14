@@ -66,14 +66,17 @@ future)
   done
 ;;
 logit)
-  for memory in 200 1000 2000
+  for memory in 200 500 1000 2000
   do
-  for margin in 0.5 0.75 1
-  do
-    while (( ${num_jobs@P} >= ${max_jobs:-1} )); do
-      wait -n
-    done
-      python main.py +scenario=cil_cifar10_5 model=$MODEL +training=cifar10_5 +method=margin device=$DEVICE method.mem_size=500 method.past_task_reg=0.25 +model.regularize_logits=True method.margin_type=fixed method.margin=$margin method.gamma=1 hydra=search +wadnb_tags=[margin_logits_ablation] head=margin_head experiment=base2 &
+    for margin in 0.25 0.5 0.75 1
+    do
+      for past_margin_w in 1 0.5 0.25 0.1 0.05 0.025 0.01
+      do
+        while (( ${num_jobs@P} >= ${max_jobs:-1} )); do
+          wait -n
+        done
+          python main.py +scenario=cil_cifar10_5 model=$MODEL +training=cifar10_5 +method=margin device=$DEVICE method.mem_size=$memory method.past_task_reg=$past_margin_w +model.regularize_logits=True method.margin_type=fixed method.margin=$margin method.gamma=1 hydra=search +wadnb_tags=[margin_logits_ablation] head=margin_head experiment=base2 &
+      done
     done
   done
 ;;
