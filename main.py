@@ -20,13 +20,9 @@ from omegaconf import DictConfig, OmegaConf, ListConfig
 from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader
 
-import methods.routing
 from base.scenario import get_dataset_nc_scenario
-from methods.debug_plugins import GradientsDebugPlugin, LogitsDebugPlugin, \
-    TrainDebugPlugin
-from models.base import get_cl_model
-from models.utils import AvalanceCombinedModel, ScaledClassifier, \
-    PytorchCombinedModel
+from methods.debug_plugins import LogitsDebugPlugin, TrainDebugPlugin
+from models.utils import AvalanceCombinedModel, ScaledClassifier, PytorchCombinedModel
 
 
 def make_train_dataloader(
@@ -244,14 +240,6 @@ def avalanche_training(cfg: DictConfig):
                 else:
                     model = AvalanceCombinedModel(backbone, head)
 
-            # model = get_cl_model(backbone=backbone,
-            #                      model_name='',
-            #                      input_shape=tuple(img.shape),
-            #                      method_name=plugin_name,
-            #                      head_classes=head_classes,
-            #                      is_class_incremental_learning=is_cil,
-            #                      **model_cfg)
-
             metrics = hydra.utils.instantiate(cfg.evaluation.metrics)
 
             loggers = []
@@ -397,23 +385,11 @@ def avalanche_training(cfg: DictConfig):
                     # for i, experience in enumerate(tasks.train_stream):
                     experience = tasks.train_stream[i]
 
-                    # eval_streams = [[e] for e in tasks.test_stream[:i + 1]]
-
-                    # res = strategy.train(experiences=experience,
-                    #                      eval_streams=eval_streams,
-                    #                      pin_memory=pin_memory,
-                    #                      num_workers=num_workers)
-
                     res = strategy.train(experiences=experience,
                                          eval_streams=[
                                              tasks.test_stream[:i + 1]],
                                          pin_memory=pin_memory,
                                          num_workers=num_workers)
-
-                    # res = strategy.train(experiences=experience,
-                    #                      eval_streams=tasks.test_stream[0],
-                    #                      pin_memory=pin_memory,
-                    #                      num_workers=num_workers)
 
                     all_results = strategy.evaluator.get_all_metrics()
 
@@ -459,18 +435,6 @@ def avalanche_training(cfg: DictConfig):
                     average_accuracy.append(v)
             average_accuracy = np.mean(average_accuracy)
             res['average_accuracy'] = average_accuracy
-
-        # for k, v in train_res[-1].items():
-        #     log.info(f'Train Metric {k}:  {v}')
-
-        # for k, v in train_res.items():
-        #     if k.startswith('Time_MB') or k.startswith('Time_Epoch'):
-        #         log.info(f'Train {k}: {np.mean(v[1]), np.std(v[1])}')
-        #
-        # for k, v in results_after_each_task[-1].items():
-        #     log.info(f'Test Metric {k}:  {v}')
-        #
-        # all_results.append(results_after_each_task)
 
     mean_res = defaultdict(list)
 
