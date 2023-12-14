@@ -1,5 +1,3 @@
-from .routing import ContinuosRouting
-
 from .ssil import SeparatedSoftmax
 
 from .podnet import PodNet
