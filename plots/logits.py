@@ -127,6 +127,15 @@ ax3.set_xticks(np.arange(0, 80+1, 5), np.arange(20, 100+1, 5))
 ax3.set_xlabel('Epoch')
 ax3.vlines([0, 20, 40, 60], 0, 1, alpha=0.5, colors='k', linestyle='dashed')
 
+for ax, lab in zip((ax1, ax2, ax3), ('A', 'B', 'C')):
+    print(ax, lab)
+    ax.annotate(lab, (1, 1),
+                xytext=(-5, -5),
+                fontsize='x-large',
+                xycoords='axes fraction',
+                textcoords='offset points',
+                ha='right', va='top')
+
 plt.show()
 
 # extent = ax1.get_window_extent().transformed(fig.dpi_scale_trans.inverted())
@@ -137,6 +146,11 @@ plt.show()
 #
 # extent = ax3.get_window_extent().transformed(fig.dpi_scale_trans.inverted())
 # fig.savefig('ax3_figure.png', bbox_inches=extent.expanded(1.2, 1.5))
+
+fig.savefig(
+    "all_logits.pdf",
+    bbox_inches='tight',
+)
 
 fig.savefig(
     "eval_score.pdf",
