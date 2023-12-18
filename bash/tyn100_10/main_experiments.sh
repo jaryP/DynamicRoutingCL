@@ -25,6 +25,7 @@ python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +metho
 python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=margin head=margin_head device=$DEVICE method.mem_size=500 method.past_task_reg=0.05 method.gamma=1 +wadnb_tags=[final_results_margin] method.margin_type=adaptive 
 python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=margin head=margin_head device=$DEVICE method.mem_size=1000 method.past_task_reg=0.05 method.gamma=1 +wadnb_tags=[final_results_margin] method.margin_type=adaptive 
 python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=margin head=margin_head device=$DEVICE method.mem_size=2000 method.past_task_reg=0.25 method.gamma=1 +wadnb_tags=[final_results_margin] method.margin_type=adaptive 
+python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=margin head=margin_head device=$DEVICE method.mem_size=5000 method.past_task_reg=0.25 method.gamma=1 +wadnb_tags=[final_results_margin] method.margin_type=adaptive
 ;;
 der)
 python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=der  device=$DEVICE method.mem_size=200 +model.head_classes=200 method.alpha=0.1 method.beta=0.5 head=linear +wadnb_tags=[final_results]
