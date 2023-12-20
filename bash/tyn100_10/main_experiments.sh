@@ -3,7 +3,7 @@
 METHOD=$1
 MODEL=$2
 DEVICE=$3
-d
+
 case $METHOD in
 gem)
   for memory in 200 500 1000 2000 5000
