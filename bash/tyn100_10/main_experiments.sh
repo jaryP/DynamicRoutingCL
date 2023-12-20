@@ -32,6 +32,7 @@ python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +metho
 python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=der  device=$DEVICE method.mem_size=500 +model.head_classes=200 method.alpha=0.1 method.beta=0.1 head=linear +wadnb_tags=[final_results]
 python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=der  device=$DEVICE method.mem_size=1000 +model.head_classes=200 method.alpha=0.1 method.beta=0.5 head=linear +wadnb_tags=[final_results]
 python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=der  device=$DEVICE method.mem_size=2000 +model.head_classes=200 method.alpha=0.1 method.beta=0.2 head=linear +wadnb_tags=[final_results]
+python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=der  device=$DEVICE method.mem_size=5000 +model.head_classes=200 method.alpha=0.1 method.beta=0.2 head=linear +wadnb_tags=[final_results]
 ;;
 naive)
   python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet  +method=naive optimizer=sgd  device="$DEVICE"
@@ -72,12 +73,12 @@ gdumb)
     python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=gdumb method.mem_size=$memory optimizer=sgd  device="$DEVICE"
   done
 ;;
-#logit_d)
-#  python main.py +scenario=cil_tyn_10 model=$MODEL +training=tinyimagenet +method=cifar100 device=$DEVICE method.mem_size=200 method.alpha=1 head=incremental
-#  python main.py +scenario=cil_tyn_10 model=$MODEL +training=tinyimagenet +method=cifar100 device=$DEVICE method.mem_size=500 method.alpha=1 head=incremental
-#  python main.py +scenario=cil_tyn_10 model=$MODEL +training=tinyimagenet +method=cifar100 device=$DEVICE method.mem_size=1000 method.alpha=0.75 head=incremental
-#  python main.py +scenario=cil_tyn_10 model=$MODEL +training=tinyimagenet +method=cifar100 device=$DEVICE method.mem_size=2000 method.alpha=0.75 head=incremental
-#;;
+logit_d)
+  python main.py +scenario=cil_tyn_10 model=$MODEL +training=tinyimagenet +method=cifar100 device=$DEVICE method.mem_size=200 method.alpha=1 head=incremental
+  python main.py +scenario=cil_tyn_10 model=$MODEL +training=tinyimagenet +method=cifar100 device=$DEVICE method.mem_size=500 method.alpha=0.5 head=incremental
+  python main.py +scenario=cil_tyn_10 model=$MODEL +training=tinyimagenet +method=cifar100 device=$DEVICE method.mem_size=1000 method.alpha=1 head=incremental
+  python main.py +scenario=cil_tyn_10 model=$MODEL +training=tinyimagenet +method=cifar100 device=$DEVICE method.mem_size=2000 method.alpha=1 head=incremental
+;;
 *)
   echo -n "Unrecognized method"
 esac
