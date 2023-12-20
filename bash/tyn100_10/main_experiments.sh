@@ -74,10 +74,10 @@ gdumb)
   done
 ;;
 logit_d)
-  python main.py +scenario=cil_tyn_10 model=$MODEL +training=tinyimagenet +method=cifar100 device=$DEVICE method.mem_size=200 method.alpha=1 head=incremental
-  python main.py +scenario=cil_tyn_10 model=$MODEL +training=tinyimagenet +method=cifar100 device=$DEVICE method.mem_size=500 method.alpha=0.5 head=incremental
-  python main.py +scenario=cil_tyn_10 model=$MODEL +training=tinyimagenet +method=cifar100 device=$DEVICE method.mem_size=1000 method.alpha=1 head=incremental
-  python main.py +scenario=cil_tyn_10 model=$MODEL +training=tinyimagenet +method=cifar100 device=$DEVICE method.mem_size=2000 method.alpha=1 head=incremental
+  python main.py +scenario=cil_tyn_10 model=$MODEL +training=tinyimagenet +method=logit_d device=$DEVICE method.mem_size=200 method.alpha=1 head=incremental
+  python main.py +scenario=cil_tyn_10 model=$MODEL +training=tinyimagenet +method=logit_d device=$DEVICE method.mem_size=500 method.alpha=0.5 head=incremental
+  python main.py +scenario=cil_tyn_10 model=$MODEL +training=tinyimagenet +method=logit_d device=$DEVICE method.mem_size=1000 method.alpha=1 head=incremental
+  python main.py +scenario=cil_tyn_10 model=$MODEL +training=tinyimagenet +method=logit_d device=$DEVICE method.mem_size=2000 method.alpha=1 head=incremental
 ;;
 *)
   echo -n "Unrecognized method"
