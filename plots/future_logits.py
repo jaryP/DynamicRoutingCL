@@ -14,7 +14,7 @@ paths = ['/media/jary/Data/progetti/DynamicModelCL/cifar10/no_test_bias/0/debug_
          '/media/jary/Data/progetti/DynamicModelCL/cifar10/_provadist_logits/0/debug_logits']
 
 markers = ['x', 's', '^']
-legends = ['Our proposal', 'DER','LD']
+legends = ['Our proposal', 'DER', 'LD']
 
 f, axs = plt.subplots(4, 1, figsize=(8, 6))
 
