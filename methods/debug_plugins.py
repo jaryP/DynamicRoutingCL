@@ -5,6 +5,7 @@ from copy import deepcopy
 
 import torch
 from avalanche.core import SupervisedPlugin, Template, CallbackResult
+from avalanche.models import avalanche_forward
 from avalanche.training.plugins import ReplayPlugin
 from avalanche.training.templates import SupervisedTemplate
 from torch.utils.data import DataLoader
@@ -265,7 +266,9 @@ class TrainDebugPlugin(SupervisedPlugin):
             for x, y, t in dataloader:
                 x = x.to(strategy.device)
 
-                pred = strategy.model(x)
+                pred = avalanche_forward(strategy.model, x, t)
+                # strategy.model(x, t)
+
                 if isinstance(pred, tuple):
                     pred, _ = pred
                     pred = torch.cat(pred, -1)

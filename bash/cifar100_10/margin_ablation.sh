@@ -21,7 +21,7 @@ margin_type)
         while (( ${num_jobs@P} >= ${max_jobs:-1} )); do
             wait -n
           done
-          python main.py +scenario=cil_cifar100_10 model=$MODEL +training=cifar100 +method=margin device=$DEVICE method.mem_size=$memory method.past_task_reg=$margin_w method.gamma=1 hydra=search +wadnb_tags=[margin_type_ablation] method.margin_type=$margin_type method.margin=$margin head=margin_head &
+          python main.py +scenario=cil_cifar100_10 model=$MODEL +training=cifar100 +method=margin device=$DEVICE method.mem_size=$memory method.past_task_reg=$margin_w method.gamma=1 hydra=search +wadnb_tags=[margin_type_ablation] method.margin_type=$margin_type method.margin=$margin head=margin_head experiment=base2 &
         done
       done
     done

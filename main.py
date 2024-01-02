@@ -299,7 +299,9 @@ def avalanche_training(cfg: DictConfig):
             if cfg.get('debug_path', None) is not None:
                 debug_path = os.path.join(experiment_path, cfg.debug_path)
                 if plugin_name == 'replay':
-                    debug_plugins = [LogitsDebugPlugin(debug_path)]
+                    debug_plugins = [
+                        # LogitsDebugPlugin(debug_path),
+                                     TrainDebugPlugin(debug_path)]
                 if plugin_name == 'der':
                     # debug_plugins = [TrainDebugPlugin(de), GradientsDebugPlugin(debug_path)]
                     debug_plugins = [TrainDebugPlugin(debug_path)]
