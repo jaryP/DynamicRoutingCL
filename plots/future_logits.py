@@ -11,10 +11,11 @@ plt.rcParams['text.usetex'] = True
 path = '/media/jary/Data/progetti/DynamicModelCL/cifar10/no_test_bias/0/debug_logits'
 paths = ['/media/jary/Data/progetti/DynamicModelCL/cifar10/no_test_bias/0/debug_logits',
          '/media/jary/Data/progetti/DynamicModelCL/cifar10/plot_probs/0/logits/',
-         '/media/jary/Data/progetti/DynamicModelCL/cifar10/_provadist_logits/0/debug_logits']
+         '/media/jary/Data/progetti/DynamicModelCL/cifar10/_provadist_logits/0/debug_logits',
+         '/media/jary/Data/progetti/DynamicModelCL/cifar10/_replay_debug/0/debug/']
 
-markers = ['x', 's', '^']
-legends = ['Our proposal', 'DER', 'LD']
+markers = ['x', 's', '^', 'D']
+legends = ['Our proposal', 'DER', 'LD', 'Replay']
 
 f, axs = plt.subplots(4, 1, figsize=(8, 6))
 
