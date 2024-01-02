@@ -21,14 +21,14 @@ margin_type)
         while (( ${num_jobs@P} >= ${max_jobs:-1} )); do
             wait -n
           done
-          python main.py +scenario=cil_tyn_10 model=$MODEL +training=tinyimagenet +method=margin device=$DEVICE method.mem_size=$memory method.past_task_reg=$margin_w method.gamma=1 hydra=search +wadnb_tags=[margin_type_ablation] method.margin_type=$margin_type method.margin=$margin head=margin_head &
+          python main.py +scenario=cil_tyn_10 model=$MODEL +training=tinyimagenet +method=margin device=$DEVICE method.mem_size=$memory method.past_task_reg=$margin_w method.gamma=1 hydra=search +wadnb_tags=[margin_type_ablation] method.margin_type=$margin_type method.margin=$margin head=margin_head  experiment=base2 &
         done
       done
     done
   done
 ;;
 scaler)
-  python main.py +scenario=cil_tyn_10 model=$MODEL +training=tinyimagenet +method=margin device=$DEVICE method.mem_size=2000 method.past_task_reg=0.25 method.gamma=1 hydra=search +wadnb_tags=[margin_scale_ablation] head=margin_head +head.scale=False
+  python main.py +scenario=cil_tyn_10 model=$MODEL +training=tinyimagenet +method=margin device=$DEVICE method.mem_size=2000 method.past_task_reg=0.25 method.gamma=1 hydra=search +wadnb_tags=[margin_scale_ablation] head=margin_head +head.scale=False  experiment=base2
 ;;
 future)
   for future_classes in 10 20 30 50
@@ -45,7 +45,7 @@ logit)
     while (( ${num_jobs@P} >= ${max_jobs:-1} )); do
       wait -n
     done
-    python main.py +scenario=cil_tyn_10 model=$MODEL +training=tinyimagenet +method=margin device=$DEVICE method.mem_size=2000 method.past_task_reg=0.25 +model.regularize_logits=True method.margin_type=fixed method.margin=$margin method.gamma=1 hydra=search +wadnb_tags=[margin_logits_ablation] head=margin_head &
+    python main.py +scenario=cil_tyn_10 model=$MODEL +training=tinyimagenet +method=margin device=$DEVICE method.mem_size=2000 method.past_task_reg=0.25 +model.regularize_logits=True method.margin_type=fixed method.margin=$margin method.gamma=1 hydra=search +wadnb_tags=[margin_logits_ablation] head=margin_head  experiment=base2 &
   done
 ;;
 sigmoid)
