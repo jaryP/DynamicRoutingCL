@@ -218,12 +218,14 @@ class ScaledClassifier(MultiTaskModule):
             scale_each_class=True,
             scale=True,
             reset_scalers=False,
+            always_combine=False,
             beta=10, gamma=1,
     ):
         super().__init__()
 
         self.in_features = in_features
         self.classifiers = torch.nn.ModuleDict()
+        self.always_combine = always_combine
 
         self.past_scaling_heads = torch.nn.ModuleDict() if scale else None
 
@@ -281,9 +283,15 @@ class ScaledClassifier(MultiTaskModule):
             scalers = [[torch.sigmoid(self.gamma * s(x) + self.beta) for s in v]
                        for v in self.past_scaling_heads.values()]
 
+            self.scalers = [[torch.sigmoid(self.gamma * s(x).detach() + self.beta) for s in v]
+                       for v in self.past_scaling_heads.values()]
+
             for i, (l, sig) in enumerate(zip(logits[1:], scalers)):
                 for j, s in enumerate(sig):
                     logits[j] = logits[j] * s
+
+        if self.always_combine:
+            return torch.cat(logits, -1)
 
         future = None
         with torch.no_grad():

@@ -187,21 +187,6 @@ def get_save_path(scenario_name: str,
     return experiment_path
 
 
-def get_optimizer(parameters,
-                  name: str,
-                  lr: float,
-                  momentum: float = 0.0,
-                  weight_decay: float = 0):
-    name = name.lower()
-    if name == 'adam':
-        return optim.Adam(parameters, lr, weight_decay=weight_decay)
-    elif name == 'sgd':
-        return optim.SGD(parameters, lr, momentum=momentum,
-                         weight_decay=weight_decay)
-    else:
-        raise ValueError('Optimizer must be adam or sgd')
-
-
 class TrainableParameters(Metric[int]):
     def __init__(self):
         self._compute_cost: Optional[int] = 0
