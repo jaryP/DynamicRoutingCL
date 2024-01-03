@@ -27,6 +27,12 @@ margin_type)
     done
   done
 ;;
+replay)
+  for memory in 200 500 1000 2000
+  do
+  python main.py +scenario=cil_cifar10_5 model=resnet20 +training=cifar10_5 +method=replay device=$DEVICE method.mem_size=$memory head=margin_head head.always_combine=True experiment=base2 +wadnb_tags=[margin_replay_ablation]
+  done
+;;
 scaler)
   memory_list=(200 500 1000 2000)
   reg_list=(0.1 0.25 0.25 0.5)
@@ -65,19 +71,19 @@ future)
     python main.py +scenario=cil_cifar10_5 model=$MODEL +training=cifar10_5 +method=margin device=$DEVICE method.mem_size=$memory method.past_task_reg=0.25 method.gamma=1 hydra=search +wadnb_tags=[margin_future_ablation] head=margin_head +head.future_classes=$future_classes &
   done
 ;;
-future)
-  for future_classes in 10 20 30 50
-  do
-    while (( ${num_jobs@P} >= ${max_jobs:-1} )); do
-      wait -n
-    done
-    python main.py +scenario=cil_cifar10_5 model=$MODEL +training=cifar10_5 +method=margin device=$DEVICE method.mem_size=$memory method.past_task_reg=0.25 method.gamma=1 hydra=search +wadnb_tags=[margin_future_ablation] head=margin_head +head.future_classes=$future_classes &
-  done
-;;
-replay)
+logit)
   for memory in 200 500 1000 2000
   do
-  python main.py +scenario=cil_cifar10_5 model=resnet20 +training=cifar10_5 +method=replay device=$DEVICE method.mem_size=$memory head=margin_head head.always_combine=True experiment=base2
+    for margin in 0.25 0.5 0.75 1
+    do
+      for past_margin_w in 1 0.5 0.25 0.1 0.05 0.025 0.01
+      do
+        while (( ${num_jobs@P} >= ${max_jobs:-1} )); do
+          wait -n
+        done
+          python main.py +scenario=cil_cifar10_5 model=$MODEL +training=cifar10_5 +method=margin device=$DEVICE method.mem_size=$memory method.past_task_reg=$past_margin_w +model.regularize_logits=True method.margin_type=fixed method.margin=$margin method.gamma=1 hydra=search +wadnb_tags=[margin_logits_ablation] head=margin_head experiment=base2 &
+      done
+    done
   done
 ;;
 sigmoid)
