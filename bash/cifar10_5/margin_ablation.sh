@@ -30,7 +30,7 @@ margin_type)
 replay)
   for memory in 200 500 1000 2000
   do
-  python main.py +scenario=cil_cifar10_5 model=resnet20 +training=cifar10_5 +method=replay device=$DEVICE method.mem_size=$memory head=margin_head head.always_combine=True experiment=base2 +wadnb_tags=[margin_replay_ablation]
+  python main.py +scenario=cil_cifar10_5 model=resnet20 +training=cifar10_5 +method=er_ace device=$DEVICE method.mem_size=$memory head=margin_head head.always_combine=True experiment=base1 +wadnb_tags=[margin_replay_ablation]
   done
 ;;
 scaler)

@@ -21,7 +21,8 @@ from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader
 
 from base.scenario import get_dataset_nc_scenario
-from methods.debug_plugins import LogitsDebugPlugin, TrainDebugPlugin
+from methods.debug_plugins import LogitsDebugPlugin, TrainDebugPlugin, \
+    GradientsDebugPlugin
 from models.utils import AvalanceCombinedModel, ScaledClassifier, PytorchCombinedModel
 
 
@@ -303,8 +304,8 @@ def avalanche_training(cfg: DictConfig):
                         # LogitsDebugPlugin(debug_path),
                                      TrainDebugPlugin(debug_path)]
                 if plugin_name == 'der':
-                    # debug_plugins = [TrainDebugPlugin(de), GradientsDebugPlugin(debug_path)]
-                    debug_plugins = [TrainDebugPlugin(debug_path)]
+                    debug_plugins = [TrainDebugPlugin(debug_path), GradientsDebugPlugin(debug_path)]
+                    # debug_plugins = [TrainDebugPlugin(debug_path)]
                 if plugin_name == 'margin' or 'logitdistillation' == plugin_name:
                     debug_plugins = [TrainDebugPlugin(debug_path)]
 

@@ -85,6 +85,8 @@ for t in all_task_results.keys():
         score = (l.argmax(-1) == g).mean()
         memory_scores.append(score)
 
+    memory_scores = np.asarray(memory_scores) - memory_scores[0]
+
     correct_logits = np.asarray(correct_logits)
     correct_errors = np.asarray(correct_errors)
 
@@ -99,10 +101,10 @@ for t in all_task_results.keys():
     if len(_eval_scores) > 0:
         eval_scores = _eval_scores
         if t != 4:
-            eval_scores = eval_scores[20:]
+            eval_scores = np.asarray(eval_scores[20:]) - eval_scores[20]
 
     x = range(max_epochs - len(correct_logits), max_epochs)
-    ax1.plot(x, correct_logits, alpha=0.5, marker=markers[t],
+    ax1.plot(x, correct_logits, alpha=1, marker=markers[t],
              linestyle='dashed', markevery=3, label=f'Task {t + 1}')
     # ax1.errorbar(x, correct_logits, yerr=correct_errors)
     ax1.fill_between(x, correct_logits - correct_errors, correct_logits + correct_errors, alpha=0.1)
@@ -115,17 +117,22 @@ for t in all_task_results.keys():
 ax1.legend(ncols=2)
 ax1.set_xticks(np.arange(0, 80+1, 5), [])
 ax1.vlines([0, 20, 40, 60], 0, 20, alpha=0.5, colors='k', linestyle='dashed')
-# ax1.set_ylabel('Logits magnitude')
+ax1.set_ylabel('Logits magnitude')
+ax1.yaxis.set_label_coords(-0.1, 0.5)
 
 # ax2.set_xticks([])
 # ax2.set_ylabel('Memory accuracy')
+# ax2.vlines([0, 20, 40, 60], 0, 1, alpha=0.5, colors='k', linestyle='dashed')
 ax2.set_xticks(np.arange(0, 80+1, 5), [])
-ax2.vlines([0, 20, 40, 60], 0, 1, alpha=0.5, colors='k', linestyle='dashed')
+ax2.vlines([0, 20, 40, 60], -1, 0, alpha=0.5, colors='k', linestyle='dashed')
+ax2.set_ylabel('Memory BWT')
 
-ax3.set_xticks(np.arange(0, 80+1, 5), np.arange(20, 100+1, 5))
+# ax3.set_xticks(np.arange(0, 80+1, 5), np.arange(20, 100+1, 5))
 # ax3.set_ylabel('Test accuracy')
+# ax3.vlines([0, 20, 40, 60], 0, 1, alpha=0.5, colors='k', linestyle='dashed')
+ax3.vlines([0, 20, 40, 60], -1, 0, alpha=0.5, colors='k', linestyle='dashed')
+ax3.set_ylabel('Test BWT')
 ax3.set_xlabel('Epoch')
-ax3.vlines([0, 20, 40, 60], 0, 1, alpha=0.5, colors='k', linestyle='dashed')
 
 for ax, lab in zip((ax1, ax2, ax3), ('A', 'B', 'C')):
     print(ax, lab)

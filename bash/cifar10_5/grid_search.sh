@@ -19,18 +19,6 @@ der)
     done
   done
 ;;
-ewc)
-  for lambda in 1 10 100 1000
-  do
-    python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=ewc_default optimizer=adam  device="$DEVICE" method.ewc_lambda=$lambda experiment=dev hydra=search
-  done
-;;
-oewc)
-  for lambda in 1 10 100 1000
-  do
-    python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=oewc_default optimizer=adam  device="$DEVICE" method.ewc_lambda=$lambda experiment=dev hydra=search
-  done
-;;
 margin)
 for memory in 200 500 1000 2000
 do
@@ -42,17 +30,6 @@ do
     python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=margin head=margin_head device=$DEVICE method.mem_size=$memory method.past_task_reg=$past_margin_w method.gamma=1 +wadnb_tags=[grid_search_margin] method.margin_type=adaptive experiment=dev hydra=search &
   done
 done
-#;;
-#  for memory in 200 500 1000 2000
-#  do
-#    for past_margin_w in 0.5 0.1 0.01 0.05
-#    do
-#          for gamma in 0.5 1 2
-#          do
-#            python main.py +scenario=cil_cifar10_5 model=$MODEL +training=cifar10_5 +method=margin device=$DEVICE method.mem_size=$memory method.past_task_reg=$past_margin_w method.gamma=$gamma hydra=search +wadnb_tags=[grid_search] experiment=dev head=margin_head wandb_prefix=lenovo_
-#          done
-#      done
-#    done
 ;;
 logit_d)
   for memory in 200 500 1000 2000
