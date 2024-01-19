@@ -198,9 +198,7 @@ class CentroidsMatching(SupervisedPlugin):
                         -1).sum()
                     loss_val += loss
                 loss_val = loss_val / len(x)
-
             else:
-
                 offsets = np.cumsum([len(c) for c in self.tasks_centroids])
 
                 offsets_tensor = torch.tensor([0] + offsets.tolist(),
@@ -353,8 +351,8 @@ class CentroidsMatching(SupervisedPlugin):
             lower = 0 if correct_task == 0 else cumsum[correct_task - 1]
 
             pred = self.calculate_similarity(e, centroids).argmax(-1)
-            pred[pred >= upper] = -1
-            pred = pred - lower
+            # pred[pred >= upper] = -1
+            # pred = pred - lower
 
         else:
             if len(self.tasks_centroids) == 0:
