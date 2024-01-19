@@ -20,19 +20,21 @@ class CustomMultiHeadClassifier(MultiTaskModule):
         self.starting_out_features = out_features
         self.classifiers = torch.nn.ModuleDict()
 
-    def adaptation(self, dataset: AvalancheDataset):
-        super().adaptation(dataset)
-        task_labels = dataset.targets_task_labels
-        if isinstance(task_labels, ConstantSequence):
-            # task label is unique. Don't check duplicates.
-            task_labels = [task_labels[0]]
+    def adaptation(self, experience: CLExperience):
+        # super().adaptation(dataset)
+        curr_classes = experience.classes_in_this_experience
+        task = experience.task_labels
 
-        for tid in set(task_labels):
+        if isinstance(task, ConstantSequence):
+            # task label is unique. Don't check duplicates.
+            task = [task[0]]
+
+        for tid in set(task):
             tid = str(tid)  # need str keys
             if tid not in self.classifiers:
 
                 if self.starting_out_features is None:
-                    out = max(dataset.targets) + 1
+                    out = max(curr_classes) + 1
                 else:
                     out = self.starting_out_features
 

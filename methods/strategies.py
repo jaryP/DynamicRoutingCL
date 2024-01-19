@@ -271,38 +271,6 @@ class MemoryContinualMetricLearning(SupervisedTemplate):
         return res
 
 
-# class SeparatedSoftmax(SupervisedTemplate):
-#
-#     def __init__(self,
-#                  model: AvalanceCombinedModel,
-#                  optimizer: Optimizer,
-#                  criterion,
-#                  train_mb_size: int = 1,
-#                  train_epochs: int = 1,
-#                  eval_mb_size: int = None,
-#                  device=None,
-#                  mem_size: int = 500,
-#                  plugins: Optional[List[SupervisedTemplate]] = None,
-#                  evaluator: EvaluationPlugin = default_evaluator, eval_every=-1):
-#
-#         rp = SeparatedSoftmaxPlugin(mem_size=mem_size)
-#
-#         self.rp = rp
-#
-#         if plugins is None:
-#             plugins = [rp]
-#         else:
-#             plugins.append(rp)
-#
-#         super().__init__(
-#             model, optimizer, criterion,
-#             train_mb_size=train_mb_size,
-#             train_epochs=train_epochs,
-#             eval_mb_size=eval_mb_size, device=device,
-#             plugins=plugins,
-#             evaluator=evaluator, eval_every=eval_every)
-
-
 class CoPE(SupervisedTemplate):
 
     def __init__(self,

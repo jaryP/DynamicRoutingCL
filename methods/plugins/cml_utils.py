@@ -320,26 +320,30 @@ class ScaleTranslate(nn.Module):
 
         self.device = device
 
-        self.s = nn.ModuleList()
-        self.t = nn.ModuleList()
+        self.s = nn.ModuleDict()
+        self.t = nn.ModuleDict()
 
     def reset(self):
-        self.s = nn.ModuleList()
-        self.t = nn.ModuleList()
+        self.s = nn.ModuleDict()
+        self.t = nn.ModuleDict()
 
-    def add_task(self, embedding_size):
-        s = nn.Sequential(nn.ReLU(),
-                          nn.Linear(embedding_size, embedding_size),
-                          nn.Sigmoid())
+    def add_task(self, task, embedding_size):
+        task = str(task)
+        if task not in self.s:
 
-        t = nn.Sequential(nn.ReLU(),
-                          nn.Linear(embedding_size, embedding_size),
-                          )
+            s = nn.Sequential(nn.ReLU(),
+                              nn.Linear(embedding_size, embedding_size),
+                              nn.Sigmoid())
 
-        self.s.append(s)
-        self.t.append(t)
+            t = nn.Sequential(nn.ReLU(),
+                              nn.Linear(embedding_size, embedding_size),
+                              )
+
+            self.s[task] = s
+            self.t[task] = t
 
     def forward(self, x, i):
+        i = str(i)
         return x * self.s[i](x) + self.t[i](x)
 
 

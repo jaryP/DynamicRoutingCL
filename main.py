@@ -17,13 +17,15 @@ from avalanche.models import IncrementalClassifier
 from avalanche.training import DER
 from avalanche.training.plugins import EvaluationPlugin
 from omegaconf import DictConfig, OmegaConf, ListConfig
+from torch import nn
 from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader
 
 from base.scenario import get_dataset_nc_scenario
 from methods.debug_plugins import LogitsDebugPlugin, TrainDebugPlugin, \
     GradientsDebugPlugin
-from models.utils import AvalanceCombinedModel, ScaledClassifier, PytorchCombinedModel
+from models.utils import AvalanceCombinedModel, ScaledClassifier, \
+    PytorchCombinedModel, CustomMultiHeadClassifier
 
 
 def make_train_dataloader(
@@ -213,20 +215,12 @@ def avalanche_training(cfg: DictConfig):
 
             # TODO: add cml, add podnet
 
-            if plugin_name not in ['cope', 'mcml']:
-                x = torch.randn((1,) + tuple(img.shape))
-                o = backbone(x)
+            x = torch.randn((1,) + tuple(img.shape))
+            o = backbone(x)
 
-                size = np.prod(o.shape)
+            size = np.prod(o.shape)
 
-                # initial_out_features = cfg.head.get('initial_out_features', None)
-                # if plugin_name == 'der':
-                #     assert initial_out_features is not None, (
-                #         'When using DER you must specify '
-                #         'the head dimension of the model, '
-                #         'by setting head_classes parameter'
-                #         'in the config file.')
-
+            if plugin_name not in ['cope', 'mcml', 'continualmetriclearning']:
                 head = hydra.utils.instantiate(cfg.head, in_features=size)
 
                 if plugin_name == 'margin':
@@ -240,6 +234,24 @@ def avalanche_training(cfg: DictConfig):
                     model = PytorchCombinedModel(backbone, head)
                 else:
                     model = AvalanceCombinedModel(backbone, head)
+            elif plugin_name == 'continualmetriclearning':
+
+                def heads_generator(i, o):
+                    class Wrapper(nn.Module):
+                        def __init__(self):
+                            super().__init__()
+                            self.model = nn.Sequential(
+                                nn.ReLU(),
+                                nn.Linear(i, o),
+                            )
+
+                        def forward(self, x, task_labels=None, **kwargs):
+                            return self.model(x)
+
+                    return Wrapper()
+
+                head = CustomMultiHeadClassifier(size, heads_generator, size)
+                model = AvalanceCombinedModel(backbone, head)
 
             metrics = hydra.utils.instantiate(cfg.evaluation.metrics)
 

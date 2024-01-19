@@ -754,11 +754,6 @@ class Margin(SupervisedTemplate):
         super()._before_forward(**kwargs)
         self._before_forward_f(**kwargs)
 
-    # def _before_train_dataset_adaptation(self, **kwargs):
-    #     if len(self.past_dataset) > 0 >= self.future_task_reg:
-    #         self.past_model = deepcopy(self.model)
-    #         self.past_model.eval()
-
     @torch.no_grad()
     def _before_training_exp(self, **kwargs):
         tid = self.experience.current_experience
@@ -870,7 +865,6 @@ class Margin(SupervisedTemplate):
 
                         mx_current_classes = distr[range(len(co)), y]
                         past_max = distr[:, :past.shape[-1]].max(-1).values
-
 
                     m = nn.functional.one_hot(y, distr.shape[-1])
                     nm = 1 - m

@@ -7,7 +7,7 @@ import torch
 from avalanche.benchmarks.utils import AvalancheConcatDataset, AvalancheSubset
 from avalanche.benchmarks.utils.data_loader import GroupBalancedDataLoader, \
     ReplayDataLoader, TaskBalancedDataLoader
-from avalanche.core import SupervisedPlugin
+from avalanche.core import SupervisedPlugin, Template, CallbackResult
 from avalanche.models import avalanche_forward
 from avalanche.training import ExperienceBalancedBuffer
 from avalanche.training.templates import SupervisedTemplate
@@ -51,9 +51,8 @@ class CentroidsMatching(SupervisedPlugin):
         self.sit = sit
 
         if sit:
-
             if memory_type == 'random':
-                self.storage_policy = RandomMemory(**memory_parameters)
+                self.storage_policy = RandomMemory(memory_size=sit_memory_size)
             elif memory_type == 'clustering':
                 self.storage_policy = ClusteringMemory(**memory_parameters)
             else:
@@ -260,6 +259,18 @@ class CentroidsMatching(SupervisedPlugin):
                                        tid=tid,
                                        model=strategy.model)
 
+    # def before_eval_dataset_adaptation(
+    #     self, strategy: Template, *args, **kwargs
+    # ) -> CallbackResult:
+    #
+    #     if len(self.tasks_centroids) == 0 or not self.sit:
+    #         return
+    #
+    #     emb_shape = self.tasks_centroids[0].shape[1]
+    #
+    #     for i in range(strategy.experience.task_label + 1):
+    #         self.scaler.add_task(i, emb_shape)
+
     def before_train_dataset_adaptation(self, strategy: 'SupervisedTemplate',
                                         **kwargs):
 
@@ -277,13 +288,16 @@ class CentroidsMatching(SupervisedPlugin):
 
         emb_shape = self.tasks_centroids[0].shape[1]
 
+        for i in range(strategy.experience.task_label + 5):
+            self.scaler.add_task(i, emb_shape)
+
         if num_tasks == 1:
-            self.scaler.add_task(embedding_size=emb_shape)
+            # self.scaler.add_task(0, emb_shape)
 
             if self.centroids_scaler is not None:
                 self.centroids_scaler.add_task(embedding_size=emb_shape)
 
-        self.scaler.add_task(embedding_size=emb_shape)
+        # self.scaler.add_task(strategy.experience.task_label, emb_shape)
         self.scaler = self.scaler.to(strategy.device)
 
         if self.centroids_scaler is not None:
@@ -308,16 +322,35 @@ class CentroidsMatching(SupervisedPlugin):
         x = strategy.mb_x
 
         if self.sit and len(self.tasks_centroids) > 1:
-            cumsum = np.cumsum([len(c) for c in self.tasks_centroids])
+            # if len(self.tasks_centroids) <= correct_task:
+            #     correct_task = len(self.tasks_centroids)
+            #     centroids = self.tasks_centroids + [self.current_centroids]
+            # else:
+            centroids = self.tasks_centroids
+
+            # embs = [avalanche_forward(strategy.model, x, task)
+            #         for task in range(len(centroids))]
+            # e = self.combine_embeddings(embs)
+            #
+            # centroids = self.combine_centroids(centroids)
+
+            embs = [avalanche_forward(strategy.model, x, task)
+                    for task in range(len(self.tasks_centroids))] + \
+                   [avalanche_forward(strategy.model, x, correct_task)]
+
+            e = self.combine_embeddings(embs)
+
+            if len(self.tasks_centroids) <= correct_task:
+                centroids = self.tasks_centroids + [self.current_centroids]
+            else:
+                centroids = self.tasks_centroids
+
+            centroids = self.combine_centroids(centroids)
+
+            cumsum = np.cumsum([len(c) for c in centroids])
 
             upper = cumsum[correct_task]
             lower = 0 if correct_task == 0 else cumsum[correct_task - 1]
-
-            embs = [avalanche_forward(strategy.model, x, task)
-                    for task in range(len(self.tasks_centroids))]
-            e = self.combine_embeddings(embs)
-
-            centroids = self.combine_centroids(self.tasks_centroids)
 
             pred = self.calculate_similarity(e, centroids).argmax(-1)
             pred[pred >= upper] = -1
@@ -327,7 +360,7 @@ class CentroidsMatching(SupervisedPlugin):
             if len(self.tasks_centroids) == 0:
                 centroids = self.current_centroids
             else:
-                centroids = self.tasks_centroids[correct_task]
+                centroids = self.tasks_centroids[-1]
 
             if centroids is None:
                 return torch.full_like(strategy.mb_y, -1)

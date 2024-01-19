@@ -115,23 +115,24 @@ for t in all_task_results.keys():
 
 # ax1.set_xticks([])
 ax1.legend(ncols=2)
-ax1.set_xticks(np.arange(0, 80+1, 5), [])
-ax1.vlines([0, 20, 40, 60], 0, 20, alpha=0.5, colors='k', linestyle='dashed')
-ax1.set_ylabel('Logits magnitude')
+ax1.set_xticks(np.arange(0, 80+1, 10), [])
+ax1.vlines([0, 20, 40, 60, 79], 0, 20, alpha=0.5, colors='k', linestyle='dashed')
+ax1.set_ylabel('Logits\nmagnitude')
 ax1.yaxis.set_label_coords(-0.1, 0.5)
 
 # ax2.set_xticks([])
 # ax2.set_ylabel('Memory accuracy')
 # ax2.vlines([0, 20, 40, 60], 0, 1, alpha=0.5, colors='k', linestyle='dashed')
-ax2.set_xticks(np.arange(0, 80+1, 5), [])
-ax2.vlines([0, 20, 40, 60], -1, 0, alpha=0.5, colors='k', linestyle='dashed')
-ax2.set_ylabel('Memory BWT')
+ax2.set_xticks(np.arange(0, 80+1, 10), [])
+ax2.vlines([0, 20, 40, 60, 79], -1, 0, alpha=0.5, colors='k', linestyle='dashed')
+ax2.set_ylabel('Memory\nForgetting')
 
 # ax3.set_xticks(np.arange(0, 80+1, 5), np.arange(20, 100+1, 5))
 # ax3.set_ylabel('Test accuracy')
 # ax3.vlines([0, 20, 40, 60], 0, 1, alpha=0.5, colors='k', linestyle='dashed')
-ax3.vlines([0, 20, 40, 60], -1, 0, alpha=0.5, colors='k', linestyle='dashed')
-ax3.set_ylabel('Test BWT')
+ax3.vlines([0, 20, 40, 60, 79], -1, 0, alpha=0.5, colors='k', linestyle='dashed')
+ax3.set_xticks(np.arange(0, 80+1, 10), np.arange(20, 100+1, 10))
+ax3.set_ylabel('Test\nForgetting')
 ax3.set_xlabel('Epoch')
 
 for ax, lab in zip((ax1, ax2, ax3), ('A', 'B', 'C')):
