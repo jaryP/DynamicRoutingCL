@@ -142,12 +142,17 @@ class ContinualMetricLearning(SupervisedTemplate):
             plugins=plugins,
             evaluator=evaluator, eval_every=eval_every)
 
+        self.offsets = {}
+
     def train_dataset_adaptation(self, **kwargs):
         """ Initialize `self.adapted_dataset`. """
 
         exp_n = self.experience.current_experience
 
         if not hasattr(self.experience, 'dev_dataset'):
+            for t in self.experience.task_labels:
+                self.offsets[t] = len(self.experience.previous_classes)
+
             dataset = self.experience.dataset
 
             idx = np.arange(len(dataset))
@@ -185,6 +190,10 @@ class ContinualMetricLearning(SupervisedTemplate):
     def forward(self):
         res = super().forward()
         if not self.model.training:
+            offsets = [self.offsets.get(t.item(), 0) for t in self.mb_task_id]
+            offsets = torch.tensor(offsets, device=self.mb_y.device)
+            self.mbatch[1] += offsets
+
             res = self.rp.calculate_classes(self, res)
         return res
 

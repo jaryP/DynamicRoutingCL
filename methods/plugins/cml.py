@@ -219,7 +219,7 @@ class CentroidsMatching(SupervisedPlugin):
                 loss_val = self._loss_f(e, y, centroids).view(-1).mean()
 
         return loss_val
-    
+
     def combine_embeddings(self, embeddings):
 
         all_embs = [self.scaler(e, task) for task, e in enumerate(embeddings)]
@@ -246,6 +246,7 @@ class CentroidsMatching(SupervisedPlugin):
             tid = strategy.experience.current_experience
 
             self.tasks_centroids.append(self.current_centroids.detach())
+            self.current_centroids = None
 
             if isinstance(strategy.model, BatchNormModelWrap):
                 for name, module in strategy.model.named_modules():
@@ -291,7 +292,6 @@ class CentroidsMatching(SupervisedPlugin):
 
         if num_tasks == 1:
             # self.scaler.add_task(0, emb_shape)
-
             if self.centroids_scaler is not None:
                 self.centroids_scaler.add_task(embedding_size=emb_shape)
 
@@ -319,36 +319,35 @@ class CentroidsMatching(SupervisedPlugin):
         correct_task = strategy.experience.current_experience
         x = strategy.mb_x
 
-        if self.sit and len(self.tasks_centroids) > 1:
+        if self.sit and len(self.tasks_centroids) > 0:
             # if len(self.tasks_centroids) <= correct_task:
             #     correct_task = len(self.tasks_centroids)
             #     centroids = self.tasks_centroids + [self.current_centroids]
             # else:
-            centroids = self.tasks_centroids
-
+            # centroids = self.tasks_centroids
             # embs = [avalanche_forward(strategy.model, x, task)
             #         for task in range(len(centroids))]
             # e = self.combine_embeddings(embs)
             #
             # centroids = self.combine_centroids(centroids)
+            if self.current_centroids is None:
+                embs = [avalanche_forward(strategy.model, x, task)
+                        for task in range(len(self.tasks_centroids))]
 
-            embs = [avalanche_forward(strategy.model, x, task)
-                    for task in range(len(self.tasks_centroids))] + \
-                   [avalanche_forward(strategy.model, x, correct_task)]
+                centroids = self.tasks_centroids
+            else:
+                embs = [avalanche_forward(strategy.model, x, task)
+                        for task in range(len(self.tasks_centroids))] + \
+                       [avalanche_forward(strategy.model, x, correct_task)]
+                centroids = self.tasks_centroids + [self.current_centroids]
 
             e = self.combine_embeddings(embs)
 
-            if len(self.tasks_centroids) <= correct_task:
-                centroids = self.tasks_centroids + [self.current_centroids]
-            else:
-                centroids = self.tasks_centroids
+            # cumsum = np.cumsum([len(c) for c in centroids])
+            # upper = cumsum[correct_task]
+            # lower = 0 if correct_task == 0 else cumsum[correct_task - 1]
 
             centroids = self.combine_centroids(centroids)
-
-            cumsum = np.cumsum([len(c) for c in centroids])
-
-            upper = cumsum[correct_task]
-            lower = 0 if correct_task == 0 else cumsum[correct_task - 1]
 
             pred = self.calculate_similarity(e, centroids).argmax(-1)
             # pred[pred >= upper] = -1

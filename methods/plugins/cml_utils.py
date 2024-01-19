@@ -344,6 +344,8 @@ class ScaleTranslate(nn.Module):
 
     def forward(self, x, i):
         i = str(i)
+        if i not in self.s:
+            return x
         return x * self.s[i](x) + self.t[i](x)
 
 
