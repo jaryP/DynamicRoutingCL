@@ -24,7 +24,7 @@ lode)
     do
     for rho in 0.1 0.2 0.5 0.8 1.0
     do
-      python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=der device=$DEVICE head=incremental method.rho=$rho experiment=dev method.mem_size=$memory hydra=search +wadnb_tags=[grid_search]
+      python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=lode device=$DEVICE head=incremental method.rho=$rho experiment=dev method.mem_size=$memory hydra=search +wadnb_tags=[grid_search]
     done
   done
 ;;
