@@ -95,6 +95,7 @@ class LODE(SupervisedTemplate):
             peval_mode=peval_mode,
         )
 
+        self.rho = rho
         self.seen_classes = []
         self.past_model = None
         if batch_size_mem is None:
@@ -162,7 +163,7 @@ class LODE(SupervisedTemplate):
                                                self.experience.classes_in_this_experience)
 
                 new_intra_cls = self.intra_cls(self.mb_output, self.mb_y, self.experience.classes_in_this_experience)
-                loss = 10 / self.clock.train_exp_counter * new_inter_cls.mean()
+                loss = self.rho / self.clock.train_exp_counter * new_inter_cls.mean()
 
                 loss = loss + new_intra_cls.mean()
 
