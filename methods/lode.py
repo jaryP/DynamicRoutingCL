@@ -1,32 +1,43 @@
-from copy import deepcopy
-from itertools import cycle
 from typing import Optional, Union, List, Callable
 
 import torch
 from avalanche.core import SupervisedPlugin
-from avalanche.models import avalanche_forward
 from avalanche.training import ClassBalancedBuffer
 from avalanche.training.plugins import EvaluationPlugin
 from avalanche.training.plugins.evaluation import default_evaluator
 from avalanche.training.templates import SupervisedTemplate
 from torch.nn import CrossEntropyLoss
 from torch.optim.optimizer import Optimizer
+from torch.nn import functional as F
+from torch.utils.data import DataLoader
 
 
-class SeparatedSoftmax(SupervisedTemplate):
+def logmeanexp_previous(x, classes1, classes2, dim=None):
+    """Stable computation of log(mean(exp(x))"""
+    if dim is None:
+        x, dim = x.view(-1), 0
+    x_max, _ = torch.max(x, dim)
+    old_pre = torch.logsumexp(x[:, classes1], dim=1)
+    new_pre = torch.logsumexp(x[:, classes2], dim=1)
+    pre = torch.stack([old_pre, new_pre], dim=-1)
+    return pre
+
+
+class LODE(SupervisedTemplate):
     """
-    Implements the SS-IL: Separated Softmax Strategy,
-    from the "SS-IL: Separated Softmax for Incremental Learning"
-    paper, Hongjoon Ahn et. al, https://arxiv.org/abs/2003.13947
+    Loss Decoupling for Task-Agnostic Continual Learning paper,
+    Yan-Shuo Liang and Wu-Jun Li, https://openreview.net/pdf?id=9Oi3YxIBSa
+    The code is based on the official implementation:
+    https://github.com/liangyanshuo/Loss-Decoupling-for-Task-Agnostic-Continual-Learning
     """
 
     def __init__(
             self,
+            rho,
             model: torch.nn.Module,
             optimizer: Optimizer,
             criterion=CrossEntropyLoss(reduction='sum'),
             mem_size: int = 200,
-            tau: float = 2,
             batch_size_mem: Optional[int] = None,
             train_mb_size: int = 1,
             train_epochs: int = 1,
@@ -84,7 +95,6 @@ class SeparatedSoftmax(SupervisedTemplate):
             peval_mode=peval_mode,
         )
 
-        self.T = tau
         self.seen_classes = []
         self.past_model = None
         if batch_size_mem is None:
@@ -98,33 +108,22 @@ class SeparatedSoftmax(SupervisedTemplate):
         )
         self.replay_loader = None
 
-    def _before_training_exp(self, **kwargs):
-        self.storage_policy.update(self, **kwargs)
-        buffer = self.storage_policy.buffer
-        if (
-                len(buffer) >= self.batch_size_mem
-                and self.experience.current_experience > 0
-        ):
-            self.replay_loader = cycle(
-                torch.utils.data.DataLoader(
-                    buffer,
-                    batch_size=self.batch_size_mem,
-                    shuffle=True,
-                    drop_last=True,
-                )
-            )
-        super()._before_training_exp(**kwargs)
+    def inter_cls(self, logits, y, classes1, classes2):
+        inter_logits = logmeanexp_previous(logits, classes1, classes2, dim=-1)
+        inter_y = torch.ones_like(y)
+        return F.cross_entropy(inter_logits, inter_y, reduction='none')
+
+    def intra_cls(self, logits, y, classes):
+        mask = torch.zeros_like(logits)
+        mask[:, classes] = 1
+        logits1 = logits - (1 - mask) * 1e9
+        # ipdb.set_trace()
+        return F.cross_entropy(logits1, y, reduction='none')
 
     def _after_training_exp(self, **kwargs):
         self.storage_policy.update(self, **kwargs)
-        self.seen_classes.append(self.experience.classes_in_this_experience)
+        self.seen_classes.extend(self.experience.classes_in_this_experience)
         super()._after_training_exp(**kwargs)
-
-    def _before_train_dataset_adaptation(self, **kwargs):
-
-        self.past_model = deepcopy(self.model)
-        self.past_model.eval()
-        super()._before_train_dataset_adaptation(**kwargs)
 
     def training_epoch(self, **kwargs):
         classes = self.experience.classes_in_this_experience
@@ -136,64 +135,42 @@ class SeparatedSoftmax(SupervisedTemplate):
             self._unpack_minibatch()
             self._before_training_iteration(**kwargs)
 
-            if self.replay_loader is not None:
-                self.mb_buffer_x, self.mb_buffer_y, self.mb_buffer_tid = next(
-                    self.replay_loader
-                )
-                self.mb_buffer_x, self.mb_buffer_y, self.mb_buffer_tid = (
-                    self.mb_buffer_x.to(self.device),
-                    self.mb_buffer_y.to(self.device),
-                    self.mb_buffer_tid.to(self.device),
-                )
-
             self.optimizer.zero_grad()
             self.loss = self._make_empty_loss()
 
             # Forward
             self._before_forward(**kwargs)
             self.mb_output = self.forward()
-            if self.replay_loader is not None:
-                self.mb_buffer_out = avalanche_forward(
-                    self.model, self.mb_buffer_x, self.mb_buffer_tid
-                )
+
             self._after_forward(**kwargs)
 
-            # Loss & Backward
-            if self.replay_loader is None:
-                self.loss = self.criterion()
+            if len(self.storage_policy.buffer) > 0:
+                mb_buffer_x, mb_buffer_y, mb_buffer_tid = next(
+                    iter(DataLoader(self.storage_policy.buffer,
+                                    batch_size=len(self.mb_output),
+                                    shuffle=True)))
+                mb_buffer_x, mb_buffer_y, mb_buffer_tid = (
+                    mb_buffer_x.to(self.device),
+                    mb_buffer_y.to(self.device),
+                    mb_buffer_tid.to(self.device),
+                )
+
+                past_logits = self.model(mb_buffer_x, mb_buffer_tid)
+                new_inter_cls = self.inter_cls(self.mb_output,
+                                               self.mb_y,
+                                               self.seen_classes,
+                                               self.experience.classes_in_this_experience)
+
+                new_intra_cls = self.intra_cls(self.mb_output, self.mb_y, self.experience.classes_in_this_experience)
+                loss = 10 / self.clock.train_exp_counter * new_inter_cls.mean()
+
+                loss = loss + new_intra_cls.mean()
+
+                loss = loss + F.cross_entropy(past_logits, mb_buffer_y)
+                self.loss = loss / 2
+
             else:
-                past_logits = self.past_model(self.mb_buffer_x,
-                                              self.mb_buffer_y)
-
-                # one_hot = torch.nn.functional.one_hot(self.mb_y - min(classes),
-                #                                       len(classes)).float()
-                # output_log = torch.log_softmax(self.mb_output[:,
-                #                                -len(classes):], dim=1)
-                # curr_ce = torch.kl_div(output_log, one_hot, reduction='sum')
-
-                curr_ce = self._criterion(self.mb_output[:, -len(classes):],
-                                          self.mb_y - min(classes))
-                prev_ce = self._criterion(self.mb_buffer_out, self.mb_buffer_y)
-
-                ce = ((curr_ce + prev_ce) /
-                      (len(past_logits) + len(self.mb_output)))
-
-                kd = 0
-
-                for t in range(len(self.seen_classes)):
-                    s = min(self.seen_classes[t])
-                    e = max(self.seen_classes[t]) + 1
-
-                    soft_target = torch.softmax(past_logits[:, s:e] / self.T,
-                                                dim=1)
-                    output_log = torch.log_softmax(
-                        self.mb_buffer_out[:, s:e] / self.T, dim=1)
-
-                    kd += torch.nn.functional.kl_div(output_log, soft_target,
-                                                     reduction='batchmean') * (
-                                      self.T ** 2)
-
-                self.loss = kd + ce
+                self.loss = self.criterion()
 
             self._before_backward(**kwargs)
             self.backward()
