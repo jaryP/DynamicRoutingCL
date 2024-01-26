@@ -20,7 +20,7 @@ der)
   done
 ;;
 lode)
-  for memory in 200 500
+  for memory in 200 500 1000 2000
     do
     for rho in 0.1 0.2 0.5 0.8 1.0
     do

@@ -11,15 +11,12 @@ gem)
     python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=gem method.patterns_per_exp=$memory device="$DEVICE"
   done
 ;;
-#ewc)
-#  python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=ewc_100   device="$DEVICE"
-#;;
-#oewc)
-#  python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=oewc_100   device="$DEVICE"
-#;;
-#cml)
-#  python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=cml_01   device="$DEVICE"
-#;;
+lode)
+  python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=lode method.mem_size=200 method.rho=0.2 device="$DEVICE"
+  python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=lode method.mem_size=500 method.rho=0.5 device="$DEVICE"
+  python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=lode method.mem_size=1000 method.rho=0.5 device="$DEVICE"
+  python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=lode method.mem_size=2000 method.rho=0.5 device="$DEVICE"
+;;
 naive)
   python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5  +method=naive   device="$DEVICE"
 ;;
