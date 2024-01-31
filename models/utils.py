@@ -124,7 +124,7 @@ class PytorchCombinedModel(nn.Module):
         self.classifier = classifier
 
     def forward(self, x: torch.Tensor, **kwargs) -> torch.Tensor:
-        return self.classifier(self.feature_extractor(x))
+        return self.classifier(self.feature_extractor(x), **kwargs)
 
 
 class FxCombinedModel(nn.Module):
@@ -267,18 +267,43 @@ class ScaledClassifier(MultiTaskModule):
             if tid not in self.classifiers:  # create new head
                 past_classifiers = len(self.classifiers)
 
-                new_head = nn.Linear(self.in_features, len(curr_classes)).to(
-                    device)
-
-                self.classifiers[tid] = new_head
-
                 if past_classifiers > 0 and self.past_scaling_heads is not None:
                     scalers = nn.ModuleList([nn.Linear(self.in_features,
                                                        len(c) if self.scale_each_class else 1)
-                                             for c in self.classes_seen_so_far])
+                                             for c in self.classes_seen_so_far[:-1]])
                     self.past_scaling_heads[tid] = scalers
 
-    def forward(self, x, task_labels=None):
+                new_head = nn.Linear(self.in_features, len(curr_classes))
+
+                self.classifiers[tid] = new_head
+    
+    def forward(self, x, task_labels=None, use_scaler=True):
+        logits = [c(x) for c in self.classifiers.values()]
+
+        if len(logits) > 1 and self.past_scaling_heads is not None and use_scaler:
+            scalers = [[torch.sigmoid(self.gamma * s(x) + self.beta) for s in v]
+                       for v in self.past_scaling_heads.values()]
+
+            self.scalers = [
+                [torch.sigmoid(self.gamma * s(x).detach() + self.beta).detach() for s in v]
+                for v in self.past_scaling_heads.values()]
+
+            for sig in scalers:
+                for j, s in enumerate(sig):
+                    logits[j] = logits[j] * s
+
+        if self.always_combine:
+            return torch.cat(logits, -1)
+
+        future = None
+        with torch.no_grad():
+            if self.future_layers is not None and self.training:
+                self.future_layers.reset_parameters()
+                future = self.future_layers(x)
+
+        return logits, future
+
+    def get_s(self, x, task_labels=None):
         logits = [c(x) for c in self.classifiers.values()]
 
         if len(logits) > 1 and self.past_scaling_heads is not None:

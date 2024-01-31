@@ -10,6 +10,8 @@ from avalanche.training.plugins import ReplayPlugin
 from avalanche.training.templates import SupervisedTemplate
 from torch.utils.data import DataLoader
 
+from models.utils import ScaledClassifier
+
 
 class LogitsDebugPlugin(SupervisedPlugin, supports_distributed=True):
     def __init__(
@@ -186,6 +188,7 @@ class TrainDebugPlugin(SupervisedPlugin):
 
         self.history = defaultdict(list)
         self.after_task_history = dict()
+        self.logits = dict()
 
         self.mem_size = mem_size
         self.batch_size = batch_size
@@ -194,6 +197,7 @@ class TrainDebugPlugin(SupervisedPlugin):
 
         self.saving_path = os.path.join(saving_path, 'logits.pkl')
         self.saving_path2 = os.path.join(saving_path, 'after_logits.pkl')
+        self.saving_path3 = os.path.join(saving_path, 'all_logits.pkl')
 
         self.eval_saving_path = os.path.join(saving_path, 'eval_scores.pkl')
         os.makedirs(saving_path, exist_ok=True)
@@ -207,11 +211,16 @@ class TrainDebugPlugin(SupervisedPlugin):
         self.history[tid].append(res)
         self.after_task_history[tid] = res
 
+        self.logits[tid] = self.save_logits(strategy)
+
         with open(self.saving_path, 'wb') as f:
             pickle.dump(self.history, f)
 
         with open(self.saving_path2, 'wb') as f:
             pickle.dump(self.after_task_history, f)
+
+        with open(self.saving_path3, 'wb') as f:
+            pickle.dump(self.logits, f)
 
     # def before_training_exp(self, strategy: Template, *args, **kwargs):
     #     dataset = strategy.experience.dataset
@@ -283,6 +292,133 @@ class TrainDebugPlugin(SupervisedPlugin):
             all_labels = torch.cat(all_labels, 0).cpu().numpy()
 
             res[i] = (all_logits, all_probs, all_labels)
+
+        strategy.model.train()
+        return res
+
+    @torch.no_grad()
+    def save_logits(self, strategy):
+        strategy.model.eval()
+
+        res = {}
+        all_logits = []
+        all_probs = []
+        all_labels = []
+
+        for i, d in self.all_dataset.items():
+            dataloader = DataLoader(d, batch_size=256, shuffle=False)
+            for x, y, t in dataloader:
+                x = x.to(strategy.device)
+
+                pred = avalanche_forward(strategy.model, x, t)
+                # strategy.model(x, t)
+
+                if isinstance(pred, tuple):
+                    pred, _ = pred
+                    pred = torch.cat(pred, -1)
+
+                all_logits.append(pred.cpu())
+
+                all_labels.append(y.cpu())
+
+        all_logits = torch.cat(all_logits, 0).cpu().numpy()
+        all_labels = torch.cat(all_labels, 0).cpu().numpy()
+
+        strategy.model.train()
+        return all_logits, all_labels
+
+
+class ScalerDebugPlugin(SupervisedPlugin):
+    def __init__(
+            self,
+            saving_path,
+            mem_size: int = 200,
+            classes=10,
+            batch_size=None,
+            batch_size_mem=None,
+            task_balanced_dataloader=False,
+            storage_policy=None,
+    ):
+
+        super().__init__()
+
+        self.replay_buffer = None
+
+        self.history = defaultdict(list)
+        self.after_task_history = dict()
+
+        self.mem_size = mem_size
+        self.batch_size = batch_size
+        self.batch_size_mem = batch_size_mem
+        self.task_balanced_dataloader = task_balanced_dataloader
+
+        self.saving_path = os.path.join(saving_path, 'logits.pkl')
+        self.saving_path2 = os.path.join(saving_path, 'after_logits.pkl')
+
+        self.eval_saving_path = os.path.join(saving_path, 'eval_scores.pkl')
+        os.makedirs(saving_path, exist_ok=True)
+
+        self.all_dataset = {}
+
+    def after_training_exp(self, strategy: Template, *args, **kwargs):
+        tid = strategy.experience.current_experience
+
+        if isinstance(strategy.model.classifier, ScaledClassifier):
+            res = self.update_logits(strategy)
+
+            self.history[tid].append(res)
+            self.after_task_history[tid] = res
+
+        with open(self.saving_path, 'wb') as f:
+            pickle.dump(self.history, f)
+
+        with open(self.saving_path2, 'wb') as f:
+            pickle.dump(self.after_task_history, f)
+
+    def after_eval_dataset_adaptation(self, strategy: Template, *args, **kwargs) -> CallbackResult:
+        tid = strategy.experience.current_experience
+        if tid not in self.all_dataset:
+            self.all_dataset[tid] = strategy.experience.dataset
+
+    def before_training_epoch(
+        self, strategy: Template, *args, **kwargs
+    ) -> CallbackResult:
+        if len(self.all_dataset) == 0:
+            return
+
+        tid = strategy.experience.current_experience
+        if isinstance(strategy.model.classifier, ScaledClassifier):
+            self.history[tid].append(self.update_logits(strategy))
+
+    @torch.no_grad()
+    def update_logits(self, strategy):
+        if getattr(strategy.model.classifier, 'scalers', None) is None:
+            return None
+
+        strategy.model.eval()
+
+        res = {}
+        for i, d in self.all_dataset.items():
+            dataloader = DataLoader(d, batch_size=256, shuffle=False)
+
+            all_logits = []
+            all_labels = []
+
+            for x, y, t in dataloader:
+                x = x.to(strategy.device)
+
+                pred = avalanche_forward(strategy.model, x, t)
+                scalers = getattr(strategy.model.classifier, 'scalers', None)
+                # strategy.model(x, t)
+
+                all_logits.append(scalers)
+
+                all_labels.append(y)
+
+            # all_logits = torch.cat(all_logits, 0).cpu().numpy()
+            # all_labels = torch.cat(all_labels, 0).cpu().numpy()
+
+            res[i] = (all_logits, all_labels)
 
         strategy.model.train()
         return res

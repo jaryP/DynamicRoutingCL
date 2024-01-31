@@ -792,32 +792,34 @@ class Margin(SupervisedTemplate):
         if tid == 0:
             return
 
-        with torch.no_grad(), torch.inference_mode():
-            logits = []
+        # TODO
+        if self.margin_type in ['mean', 'normal']:
+            with torch.no_grad(), torch.inference_mode():
+                logits = []
 
-            for x, y, t in self.dataloader:
-                x, y = x.to(self.device), y.to(self.device)
+                for x, y, t in self.dataloader:
+                    x, y = x.to(self.device), y.to(self.device)
 
-                preds, _ = self.model(x)
-                past = torch.cat(preds, -1)
+                    preds, _ = self.model(x)
+                    past = torch.cat(preds, -1)
 
-                preds = torch.cat(preds, -1)
-                preds = torch.softmax(preds, -1)
+                    preds = torch.cat(preds, -1)
+                    preds = torch.softmax(preds, -1)
 
-                # cl = preds[:, :past.shape[-1]].max(-1).values
+                    # cl = preds[:, :past.shape[-1]].max(-1).values
 
-                cl = preds[range(len(preds)), y]
+                    cl = preds[range(len(preds)), y]
 
-                logits.append(cl)
+                    logits.append(cl)
 
-            # logits = torch.cat(logits, 0) / 2
-            logits = torch.cat(logits, 0)
+                # logits = torch.cat(logits, 0) / 2
+                logits = torch.cat(logits, 0)
 
-            if self.margin_type == 'mean':
-                self._margin = 1 - logits.mean()
-            elif self.margin_type != 'normal':
-                self.margin_distribution = torch.distributions.normal.Normal(
-                    logits.mean(), logits.std())
+                if self.margin_type == 'mean':
+                    self._margin = 1 - logits.mean()
+                elif self.margin_type != 'normal':
+                    self.margin_distribution = torch.distributions.normal.Normal(
+                        logits.mean(), logits.std())
 
     def criterion(self):
         tid = self.experience.current_experience

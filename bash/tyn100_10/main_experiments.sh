@@ -11,15 +11,13 @@ gem)
     python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=gem method.patterns_per_exp=$memory  optimizer=sgd  device="$DEVICE" experiment=base2
   done
 ;;
-#ewc)
-#  python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=ewc_100 optimizer=sgd  device="$DEVICE"
-#;;
-#oewc)
-#  python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=oewc_100 optimizer=sgd  device="$DEVICE"
-#;;
-#cml)
-#  python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=cml_01 optimizer=sgd  device="$DEVICE"
-#;;
+lode)
+  python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=lode method.mem_size=200 method.rho=0.1 device="$DEVICE"
+  python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=lode method.mem_size=500 method.rho=0.1 device="$DEVICE"
+  python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=lode method.mem_size=1000 method.rho=0.1 device="$DEVICE"
+  python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=lode method.mem_size=2000 method.rho=0.2 device="$DEVICE"
+  python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=lode method.mem_size=5000 method.rho=0.5 device="$DEVICE"
+;;
 margin)
 python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=margin head=margin_head device=$DEVICE method.mem_size=200 method.past_task_reg=0.05 method.gamma=1 +wadnb_tags=[final_results_margin] method.margin_type=adaptive 
 python main.py +scenario=cil_tyn_10 model="$MODEL" +training=tinyimagenet +method=margin head=margin_head device=$DEVICE method.mem_size=500 method.past_task_reg=0.05 method.gamma=1 +wadnb_tags=[final_results_margin] method.margin_type=adaptive 

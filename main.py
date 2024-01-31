@@ -23,7 +23,7 @@ from torch.utils.data import DataLoader
 
 from base.scenario import get_dataset_nc_scenario
 from methods.debug_plugins import LogitsDebugPlugin, TrainDebugPlugin, \
-    GradientsDebugPlugin
+    GradientsDebugPlugin, ScalerDebugPlugin
 from models.utils import AvalanceCombinedModel, ScaledClassifier, \
     PytorchCombinedModel, CustomMultiHeadClassifier
 
@@ -319,6 +319,9 @@ def avalanche_training(cfg: DictConfig):
                     debug_plugins = [TrainDebugPlugin(debug_path), GradientsDebugPlugin(debug_path)]
                     # debug_plugins = [TrainDebugPlugin(debug_path)]
                 if plugin_name == 'margin' or 'logitdistillation' == plugin_name:
+                    debug_plugins = [TrainDebugPlugin(debug_path),
+                                     ScalerDebugPlugin(debug_path)]
+                if plugin_name == 'er_ace':
                     debug_plugins = [TrainDebugPlugin(debug_path)]
 
             if cfg is not None and '_target_' in cfg.method:
