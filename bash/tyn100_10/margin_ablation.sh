@@ -21,14 +21,24 @@ margin_type)
         while (( ${num_jobs@P} >= ${max_jobs:-1} )); do
             wait -n
           done
-          python main.py +scenario=cil_tyn_10 model=$MODEL +training=tinyimagenet +method=margin device=$DEVICE method.mem_size=$memory method.past_task_reg=$margin_w method.gamma=1 hydra=search +wadnb_tags=[margin_type_ablation] method.margin_type=$margin_type method.margin=$margin head=margin_head  experiment=base2 &
+          python main.py +scenario=cil_tyn_10 model=$MODEL +training=tinyimagenet +method=margin device=$DEVICE method.mem_size=$memory method.past_task_reg=$margin_w method.gamma=1 hydra=search +wadnb_tags=[margin_type_ablation] method.margin_type=$margin_type method.margin=$margin head=margin_head  experiment=base1 &
         done
       done
     done
   done
 ;;
 scaler)
-  python main.py +scenario=cil_tyn_10 model=$MODEL +training=tinyimagenet +method=margin device=$DEVICE method.mem_size=2000 method.past_task_reg=0.25 method.gamma=1 hydra=search +wadnb_tags=[margin_scale_ablation] head=margin_head +head.scale=False  experiment=base2
+  memory_list=(500 1000 2000 5000)
+  reg_list=(0.05 0.05 0.25 0.25)
+
+  for i in "${!memory_list[@]}"
+  do
+    memory=${memory_list[i]}
+    reg=${reg_list[i]}
+
+    python main.py +scenario=cil_tyn_10 model=$MODEL +training=tinyimagenet +method=margin device=$DEVICE method.mem_size=$memory method.past_task_reg=$reg method.gamma=1 hydra=search +wadnb_tags=[margin_scale_ablation] head=margin_head +head.scale=True  experiment=base1
+    python main.py +scenario=cil_tyn_10 model=$MODEL +training=tinyimagenet +method=margin device=$DEVICE method.mem_size=$memory method.past_task_reg=$reg method.gamma=1 hydra=search +wadnb_tags=[margin_scale_single_ablation] head=margin_head +head.scale=True head.scale_each_class=True experiment=base1
+  done
 ;;
 future)
   for future_classes in 10 20 30 50
@@ -45,7 +55,7 @@ logit)
     while (( ${num_jobs@P} >= ${max_jobs:-1} )); do
       wait -n
     done
-    python main.py +scenario=cil_tyn_10 model=$MODEL +training=tinyimagenet +method=margin device=$DEVICE method.mem_size=2000 method.past_task_reg=0.25 +model.regularize_logits=True method.margin_type=fixed method.margin=$margin method.gamma=1 hydra=search +wadnb_tags=[margin_logits_ablation] head=margin_head  experiment=base2 &
+    python main.py +scenario=cil_tyn_10 model=$MODEL +training=tinyimagenet +method=margin device=$DEVICE method.mem_size=2000 method.past_task_reg=0.25 +model.regularize_logits=True method.margin_type=fixed method.margin=$margin method.gamma=1 hydra=search +wadnb_tags=[margin_logits_ablation] head=margin_head  experiment=base1 &
   done
 ;;
 sigmoid)
@@ -56,7 +66,7 @@ sigmoid)
       while (( ${num_jobs@P} >= ${max_jobs:-1} )); do
         wait -n
       done
-      python main.py +scenario=cil_tyn_10 model=$MODEL +training=tinyimagenet +method=margin device=$DEVICE method.mem_size=2000 method.past_task_reg=0.25 +model.regularize_logits=True method.gamma=1 hydra=search +wadnb_tags=[margin_simgoid_ablation] head=margin_head head.a=$a head.b=$b experiment=base2 &
+      python main.py +scenario=cil_tyn_10 model=$MODEL +training=tinyimagenet +method=margin device=$DEVICE method.mem_size=2000 method.past_task_reg=0.25 +model.regularize_logits=True method.gamma=1 hydra=search +wadnb_tags=[margin_simgoid_ablation] head=margin_head head.a=$a head.b=$b experiment=base1 &
     done
   done
 ;;
@@ -71,6 +81,12 @@ do
     python main.py +scenario=cil_tyn_10 model=$MODEL +training=tinyimagenet +method=margin device=$DEVICE method.mem_size=$memory method.past_task_reg=$past_margin_w method.gamma=1 hydra=search +wadnb_tags=[sp_to_ablation] method.margin_type=adaptive  experiment=base1 head=margin_head &
   done
 done
+;;
+replay)
+  for memory in 500 1000 2000
+  do
+  python main.py +scenario=cil_tyn_10 model=resnet20 +training=tinyimagenet +method=er_ace device=$DEVICE method.mem_size=$memory head=margin_head head.always_combine=True experiment=base1 +wadnb_tags=[margin_replay_ablation]
+  done
 ;;
 *)
   echo -n "Unrecognized ablation experiment"

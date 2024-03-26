@@ -1,2 +1,2 @@
 _target_: torch.nn.Linear
-out_features: 100
+out_features: 200

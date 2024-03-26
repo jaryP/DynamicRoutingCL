@@ -55,7 +55,8 @@ class AvalanceCombinedModel(MultiTaskModule):
         # if p is not None:
         #     self.dropout = Dropout(p)
 
-    def forward_single_task(self, x: torch.Tensor, task_label: int,
+    def forward_single_task(self, x: torch.Tensor,
+                            task_label: int,
                             return_embeddings: bool = False,
                             t=None):
 
@@ -219,6 +220,7 @@ class ScaledClassifier(MultiTaskModule):
             future_classes=None,
             scale_each_class=True,
             scale=True,
+            single_scaler=False,
             reset_scalers=False,
             always_combine=False,
             beta=10, gamma=1,
@@ -238,6 +240,7 @@ class ScaledClassifier(MultiTaskModule):
 
         self._stop = nn.Parameter(torch.randn(1))
         self.scale_each_class = scale_each_class
+        self.single_scaler = single_scaler
         self.reset_scalers = reset_scalers
 
         self.future_classes = future_classes
@@ -273,24 +276,30 @@ class ScaledClassifier(MultiTaskModule):
                 self.classifiers[tid] = new_head
 
                 if past_classifiers > 0 and self.past_scaling_heads is not None:
-                    scalers = nn.ModuleList([nn.Linear(self.in_features,
-                                                       len(c) if self.scale_each_class else 1)
-                                             for c in self.classes_seen_so_far])
+                    if self.single_scaler:
+                        scalers = nn.Linear(self.in_features, 1)
+                    else:
+                        scalers = nn.ModuleList([nn.Linear(self.in_features,
+                                                           len(c) if self.scale_each_class else 1)
+                                                 for c in self.classes_seen_so_far])
                     self.past_scaling_heads[tid] = scalers
 
     def forward(self, x, task_labels=None):
         logits = [c(x) for c in self.classifiers.values()]
 
         if len(logits) > 1 and self.past_scaling_heads is not None:
-            scalers = [[torch.sigmoid(self.gamma * s(x) + self.beta) for s in v]
-                       for v in self.past_scaling_heads.values()]
+            if self.single_scaler:
+                scalers = [torch.sigmoid(self.gamma * s(x) + self.beta)
+                           for s in self.past_scaling_heads.values()]
+                for i, s in enumerate(scalers):
+                    logits[i] = logits[i] * s
+            else:
+                scalers = [[torch.sigmoid(self.gamma * s(x) + self.beta) for s in v]
+                           for v in self.past_scaling_heads.values()]
 
-            self.scalers = [[torch.sigmoid(self.gamma * s(x).detach() + self.beta) for s in v]
-                       for v in self.past_scaling_heads.values()]
-
-            for i, (l, sig) in enumerate(zip(logits[1:], scalers)):
-                for j, s in enumerate(sig):
-                    logits[j] = logits[j] * s
+                for i, (l, sig) in enumerate(zip(logits[1:], scalers)):
+                    for j, s in enumerate(sig):
+                        logits[j] = logits[j] * s
 
         if self.always_combine:
             return torch.cat(logits, -1)

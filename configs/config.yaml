@@ -10,7 +10,7 @@ defaults:
   - optimizer: sgd
   - head: incremental
   - model: null
-  - experiment: base
+  - experiment: base2
   - evaluation: default
   - override hydra/job_logging: console
   - _self_

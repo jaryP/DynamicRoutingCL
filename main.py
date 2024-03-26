@@ -27,6 +27,7 @@ from methods.debug_plugins import LogitsDebugPlugin, TrainDebugPlugin, \
 from models.utils import AvalanceCombinedModel, ScaledClassifier, \
     PytorchCombinedModel, CustomMultiHeadClassifier
 
+torch.set_num_threads(1)
 
 def make_train_dataloader(
     self,
@@ -230,12 +231,13 @@ def avalanche_training(cfg: DictConfig):
                 elif plugin_name == 'der':
                     assert isinstance(head, torch.nn.Linear)
 
-                if plugin_name in ['margin', 'incrementalmargin', 'der', 'logitdistillation']:
-                    model = PytorchCombinedModel(backbone, head)
-                else:
-                    model = AvalanceCombinedModel(backbone, head)
-            elif plugin_name == 'continualmetriclearning':
+                # if plugin_name in ['margin', 'incrementalmargin', 'der', 'logitdistillation']:
+                # if plugin_name not in ['naive', 'cumulative']:
+                model = PytorchCombinedModel(backbone, head)
+                # else:
+                #     model = AvalanceCombinedModel(backbone, head)
 
+            elif plugin_name == 'continualmetriclearning':
                 def heads_generator(i, o):
                     class Wrapper(nn.Module):
                         def __init__(self):

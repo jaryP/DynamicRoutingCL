@@ -156,7 +156,8 @@ class LODE(SupervisedTemplate):
                     mb_buffer_tid.to(self.device),
                 )
 
-                past_logits = self.model(mb_buffer_x, mb_buffer_tid)
+                # past_logits = self.model(mb_buffer_x, mb_buffer_tid)
+                past_logits = self.model(mb_buffer_x)
                 new_inter_cls = self.inter_cls(self.mb_output,
                                                self.mb_y,
                                                self.seen_classes,

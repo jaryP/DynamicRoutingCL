@@ -3,8 +3,8 @@ METHOD=$1
 MODEL=$2
 DEVICE=$3
 
-max_jobs=$4
-num_jobs="\j"
+#max_jobs=$4
+#num_jobs="\j"
 
 case $METHOD in
 der)
@@ -37,6 +37,16 @@ do
       wait -n
     done
     python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=margin head=margin_head device=$DEVICE method.mem_size=$memory method.past_task_reg=$past_margin_w method.gamma=1 +wadnb_tags=[grid_search_margin] method.margin_type=adaptive experiment=dev hydra=search &
+  done
+done
+;;
+margin1)
+echo
+for memory in 200 500 1000 2000
+do
+  for past_margin_w in 0.5 0.25 0.1 0.01
+  do
+    python main.py +scenario=cil_cifar10_5 model="$MODEL" +training=cifar10_5 +method=margin head=margin_head device=$DEVICE method.mem_size=$memory method.past_task_reg=$past_margin_w method.gamma=1 +wadnb_tags=[grid_search_margin] method.margin_type=adaptive head.scale_each_class=False experiment=dev hydra=search
   done
 done
 ;;

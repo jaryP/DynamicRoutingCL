@@ -127,8 +127,9 @@ def annotate_heatmap(im, data=None, valfmt="{x:.2f}",
 
     return texts
 
-acc_results = defaultdict(dict)
-bwt_results = defaultdict(dict)
+acc_results = defaultdict(lambda : defaultdict(int))
+bwt_results = defaultdict(lambda : defaultdict(int))
+counters = defaultdict(lambda : defaultdict(int))
 
 import wandb
 api = wandb.Api()
@@ -138,11 +139,28 @@ runs = api.runs("jary-pomponi-r/margin_cl",
                 filters={"tags": "margin_simgoid_ablation"})
 
 summary_list, config_list, name_list = [], [], []
+
 for run in runs:
     # .summary contains the output keys/values for metrics like accuracy.
     #  We call ._json_dict to omit large files
-    acc_results[run.config['head']['beta']][run.config['head']['gamma']] = run.summary['Top1_Acc_Stream/eval_phase/test_stream/Task000']
-    bwt_results[run.config['head']['beta']][run.config['head']['gamma']] = run.summary['StreamBWT/eval_phase/test_stream']
+    # print(run.status, run.config['head'], run.summary['Top1_Acc_Stream/eval_phase/test_stream/Task000'], run.summary['StreamBWT/eval_phase/test_stream'])
+    if run.state != 'finished':
+        continue
+    print(run, run.config['head'], run.summary['Top1_Acc_Stream/eval_phase/test_stream/Task000'])
+    if 'a' in run.config['head']:
+        run.config['head']['gamma'] = run.config['head']['b']
+        run.config['head']['beta'] = run.config['head']['a']
+
+    # if run.config['head']['gamma'] in acc_results[run.config['head']['beta']]:
+    #     continue
+    if counters[run.config['head']['beta']][run.config['head']['gamma']] >= 2:
+        continue
+    acc_results[run.config['head']['beta']][run.config['head']['gamma']] += run.summary['Top1_Acc_Stream/eval_phase/test_stream/Task000']
+    bwt_results[run.config['head']['beta']][run.config['head']['gamma']] += run.summary['StreamBWT/eval_phase/test_stream']
+    counters[run.config['head']['beta']][run.config['head']['gamma']] += 1
+
+    # acc_results[run.config['head']['a']][run.config['head']['b']] = run.summary['Top1_Acc_Stream/eval_phase/test_stream/Task000']
+    # bwt_results[run.config['head']['a']][run.config['head']['b']] = run.summary['StreamBWT/eval_phase/test_stream']
 
 a_vals = sorted(acc_results.keys(), reverse=False)
 b_vals = sorted(acc_results[a_vals[0]].keys(), reverse=False)
@@ -153,6 +171,9 @@ bwt_matrix = np.zeros((len(a_vals), len(b_vals)))
 for i, m in enumerate(a_vals):
     acc_matrix[i] = [acc_results[m][r] for r in b_vals]
     bwt_matrix[i] = [bwt_results[m][r] for r in b_vals]
+
+acc_matrix = acc_matrix / 2
+bwt_matrix = bwt_matrix / 2
 
 fig, ax = plt.subplots()
 
