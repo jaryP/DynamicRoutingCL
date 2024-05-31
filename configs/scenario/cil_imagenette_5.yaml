@@ -1,0 +1,5 @@
+dataset: imagenette
+scenario: splitimagenette
+n_tasks: 5
+return_task_id: false
+shuffle: true

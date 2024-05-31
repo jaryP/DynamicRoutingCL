@@ -1,0 +1,6 @@
+dataset: cifar10
+scenario: splitcifar10
+n_tasks: 5
+return_task_id: True
+shuffle: true
+online: True

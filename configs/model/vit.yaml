@@ -1,0 +1,7 @@
+_target_: torchvision.models.VisionTransformer
+image_size: 320
+patch_size: 16
+num_layers: 4
+num_heads: 4
+hidden_dim: 192
+mlp_dim: 768

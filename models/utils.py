@@ -286,6 +286,7 @@ class ScaledClassifier(MultiTaskModule):
 
     def forward(self, x, task_labels=None):
         logits = [c(x) for c in self.classifiers.values()]
+        es = torch.sum(torch.exp(torch.cat(logits, -1)), -1, keepdim=True)
 
         if len(logits) > 1 and self.past_scaling_heads is not None:
             if self.single_scaler:
@@ -299,6 +300,7 @@ class ScaledClassifier(MultiTaskModule):
 
                 for i, (l, sig) in enumerate(zip(logits[1:], scalers)):
                     for j, s in enumerate(sig):
+
                         logits[j] = logits[j] * s
 
         if self.always_combine:
