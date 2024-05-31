@@ -27,15 +27,17 @@ from methods.debug_plugins import LogitsDebugPlugin, TrainDebugPlugin, \
 from models.utils import AvalanceCombinedModel, ScaledClassifier, \
     PytorchCombinedModel, CustomMultiHeadClassifier
 
+torch.set_num_threads(1)
+
 
 def make_train_dataloader(
-    self,
-    num_workers=0,
-    shuffle=True,
-    pin_memory=None,
-    persistent_workers=False,
-    drop_last=False,
-    **kwargs
+        self,
+        num_workers=0,
+        shuffle=True,
+        pin_memory=None,
+        persistent_workers=False,
+        drop_last=False,
+        **kwargs
 ):
     """Data loader initialization.
 
@@ -87,6 +89,7 @@ def avalanche_training(cfg: DictConfig):
     scenario = cfg['scenario']
     dataset = scenario['dataset']
     n_tasks = scenario['n_tasks']
+    online_scenario = scenario.get('online', False)
     task_incremental_learning = scenario['return_task_id']
     permuted_dataset = scenario.get('permuted_dataset', False)
 
@@ -230,12 +233,13 @@ def avalanche_training(cfg: DictConfig):
                 elif plugin_name == 'der':
                     assert isinstance(head, torch.nn.Linear)
 
-                if plugin_name in ['margin', 'incrementalmargin', 'der', 'logitdistillation']:
-                    model = PytorchCombinedModel(backbone, head)
-                else:
-                    model = AvalanceCombinedModel(backbone, head)
-            elif plugin_name == 'continualmetriclearning':
+                # if plugin_name in ['margin', 'incrementalmargin', 'der', 'logitdistillation']:
+                # if plugin_name not in ['naive', 'cumulative']:
+                model = PytorchCombinedModel(backbone, head)
+                # else:
+                #     model = AvalanceCombinedModel(backbone, head)
 
+            elif plugin_name == 'continualmetriclearning':
                 def heads_generator(i, o):
                     class Wrapper(nn.Module):
                         def __init__(self):
@@ -314,7 +318,7 @@ def avalanche_training(cfg: DictConfig):
                 if plugin_name == 'replay':
                     debug_plugins = [
                         # LogitsDebugPlugin(debug_path),
-                                     TrainDebugPlugin(debug_path)]
+                        TrainDebugPlugin(debug_path)]
                 if plugin_name == 'der':
                     debug_plugins = [TrainDebugPlugin(debug_path), GradientsDebugPlugin(debug_path)]
                     # debug_plugins = [TrainDebugPlugin(debug_path)]
@@ -375,29 +379,44 @@ def avalanche_training(cfg: DictConfig):
 
             indexes = np.arange(len(tasks.train_stream))
 
-            if plugin_name == 'cope':
+            from avalanche.benchmarks.scenarios import OnlineCLScenario, split_online_stream
+
+            if online_scenario:
+                # ocl = OnlineCLScenario(tasks.train_stream)
+                # if plugin_name == 'cope':
                 tasks = data_incremental_benchmark(tasks, batch_size,
                                                    shuffle=True)
                 indexes = np.arange(len(tasks.train_stream))
 
-                if cfg.method.get('shuffle', False):
-                    np.random.shuffle(indexes)
+                # if cfg.method.get('shuffle', False):
+                np.random.shuffle(indexes)
 
-                for _ in range(epochs):
-                    for i in indexes:
-                        # for i, experience in enumerate(tasks.train_stream):
-                        experience = tasks.train_stream[i]
-                        train_res = strategy.train(experiences=experience,
-                                                   pin_memory=pin_memory,
-                                                   num_workers=num_workers)
+                strategy.train_epochs = 1
 
-                        break
+                # for _ in range(epochs):
+                for i in indexes:
+                    # for i, experience in enumerate(tasks.train_stream):
+                    experience = tasks.train_stream[i]
+                    res = strategy.train(experiences=experience,
+                                         pin_memory=pin_memory,
+                                         num_workers=num_workers)
 
-                    results_after_each_task.append(
-                        strategy.eval(tasks.test_stream,
-                                      pin_memory=pin_memory,
-                                      num_workers=num_workers))
+                    # break
 
+                    if eval_every < 0:
+                        all_results_dev = strategy.eval(
+                            tasks.test_stream,
+                            pin_memory=pin_memory,
+                            num_workers=num_workers)
+
+                    if save_states:
+                        torch.save(strategy,
+                                   os.path.join(results_path, f'state_{i}.pt'))
+
+                    res = strategy.eval(tasks.test_stream,
+                                        pin_memory=pin_memory,
+                                        num_workers=num_workers)
+                    results_after_each_task.append(res)
             else:
                 for i in indexes:
                     # for i, experience in enumerate(tasks.train_stream):
