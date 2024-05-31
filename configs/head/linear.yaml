@@ -1,0 +1,2 @@
+_target_: torch.nn.Linear
+out_features: 100

@@ -1,17 +1,8 @@
-from avalanche.training import DER, Replay, GEM, Cumulative, Naive, \
-    JointTraining, ICaRL
+# from .routing import ContinuosRouting
+# from .podnet import PodNet
 
-from .routing import ContinuosRouting
+from .ssil import SeparatedSoftmax
 
-from methods.strategies import SeparatedSoftmaxIncrementalLearning
+from .margin import Margin
 
-# AVAILABLE_METHODS = {
-#     'ssil': SeparatedSoftmaxIncrementalLearning,
-#     'der': DER,
-#     'replay': Replay,
-#     'gem': GEM,
-#     'cumulative': Cumulative,
-#     'naive': Naive,
-#     'joint': JointTraining,
-#     'icarl': ICaRL
-# }
+from .replay_logits import LogitDistillation

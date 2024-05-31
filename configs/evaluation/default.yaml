@@ -1,0 +1,21 @@
+metrics:
+  - _target_: avalanche.evaluation.metrics.StreamAccuracy
+  - _target_: avalanche.evaluation.metrics.ExperienceAccuracy
+  - _target_: avalanche.evaluation.metrics.TrainedExperienceAccuracy
+  - _target_: avalanche.evaluation.metrics.StreamBWT
+  - _target_: avalanche.evaluation.metrics.ExperienceBWT
+  - _target_: base.utils.StreamTrainableParameters
+#loggers:
+#  - _target_: avalanche.logging.text_logging.TextLogger
+#  - _target_: avalanche.logging.WandBLogger
+enable_textlog: Yes
+
+#from avalanche.logging import WandBLogger
+#from avalanche.logging.text_logging import TextLogger
+
+#  StreamAccuracy
+#  ExperienceAccuracy
+#  TrainedExperienceAccuracy
+#  StreamBWT
+#  ExperienceBWT
+#  StreamTrainableParameters

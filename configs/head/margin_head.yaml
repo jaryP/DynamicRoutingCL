@@ -1,0 +1,5 @@
+_target_: models.utils.ScaledClassifier
+scale_each_class: Yes
+beta: 10
+gamma: 1
+always_combine: No

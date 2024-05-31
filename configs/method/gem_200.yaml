@@ -1,3 +1,0 @@
-_target_: avalanche.training.GEM
-patterns_per_experience: 200
-memory_strength: 0.5

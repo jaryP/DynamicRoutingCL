@@ -1,4 +1,0 @@
-_target_: avalanche.training.ICaRL
-fixed_memory: no
-buffer_transform: null
-memory_size: 200

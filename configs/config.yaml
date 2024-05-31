@@ -1,5 +1,5 @@
 core:
-  project_name: 'routing-cl'
+  project_name: 'margin_cl'
   dataset_root: ./dataset/
   results_path: ./results
   version: 1
@@ -8,11 +8,16 @@ core:
 defaults:
   - hydra: base
   - optimizer: sgd
+  - head: incremental
+  - model: null
   - experiment: base
+  - evaluation: default
   - override hydra/job_logging: console
   - _self_
 
 device: cpu
-#trainer:
 trainer_name: ${method_path:${method._target_}}
-
+wandb_prefix: null
+wandb_tags: null
+enable_wandb: Yes
+debug_path: null

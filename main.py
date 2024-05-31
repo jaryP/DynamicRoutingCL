@@ -3,121 +3,74 @@ import logging
 import os
 import random
 import warnings
+from collections import defaultdict
+from types import MethodType
+from typing import Sequence
 
 import hydra
 import numpy as np
 import torch
-import yaml
-from avalanche.benchmarks import data_incremental_benchmark, SplitCIFAR10
-from avalanche.evaluation.metrics import accuracy_metrics, bwt_metrics, \
-    timing_metrics, forgetting_metrics, MAC_metrics, StreamAccuracy, \
-    TrainedExperienceAccuracy
-from avalanche.logging import WandBLogger
+from avalanche.benchmarks import data_incremental_benchmark
+from avalanche.logging import WandBLogger, TextLogger
+from avalanche.models import IncrementalClassifier
 
-from avalanche.logging.text_logging import TextLogger
 from avalanche.training import DER
 from avalanche.training.plugins import EvaluationPlugin
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig, OmegaConf, ListConfig
+from torch import nn
 from torch.nn import CrossEntropyLoss
+from torch.utils.data import DataLoader
 
 from base.scenario import get_dataset_nc_scenario
-from models.base import get_cl_model
-from utils import TrainableParametersPlugin, ExperienceTrainableParameters, \
-    StreamTrainableParameters
+from methods.debug_plugins import LogitsDebugPlugin, TrainDebugPlugin, \
+    GradientsDebugPlugin, ScalerDebugPlugin
+from models.utils import AvalanceCombinedModel, ScaledClassifier, \
+    PytorchCombinedModel, CustomMultiHeadClassifier
 
-# from models.base import get_cl_model
 
-# class CustomTextLogger(StrategyLogger):
-#     def __init__(self, file=sys.stdout):
-#         super().__init__()
-#         self.file = file
-#         self.metric_vals = {}
-#
-#     def log_single_metric(self, name, value, x_plot) -> None:
-#         self.metric_vals[name] = (name, x_plot, value)
-#
-#     def _val_to_str(self, m_val):
-#         if isinstance(m_val, torch.Tensor):
-#             return '\n' + str(m_val)
-#         elif isinstance(m_val, float):
-#             return f'{m_val:.4f}'
-#         else:
-#             return str(m_val)
-#
-#     def print_current_metrics(self):
-#         sorted_vals = sorted(self.metric_vals.values(),
-#                              key=lambda x: x[0])
-#         for name, x, val in sorted_vals:
-#             if isinstance(val, UNSUPPORTED_TYPES):
-#                 continue
-#             val = self._val_to_str(val)
-#             print(f'\t{name} = {val}', file=self.file, flush=True)
-#
-#     def before_training_exp(self, strategy: 'SupervisedTemplate',
-#                             metric_values: List['MetricValue'], **kwargs):
-#         super().before_training_exp(strategy, metric_values, **kwargs)
-#         self._on_exp_start(strategy)
-#
-#     def before_eval_exp(self, strategy: 'SupervisedTemplate',
-#                         metric_values: List['MetricValue'], **kwargs):
-#         super().before_eval_exp(strategy, metric_values, **kwargs)
-#         self._on_exp_start(strategy)
-#
-#     def after_eval_exp(self, strategy: 'SupervisedTemplate',
-#                        metric_values: List['MetricValue'], **kwargs):
-#         super().after_eval_exp(strategy, metric_values, **kwargs)
-#         exp_id = strategy.experience.current_experience
-#         task_id = phase_and_task(strategy)[1]
-#         if task_id is None:
-#             print(f'> Eval on experience {exp_id} '
-#                   f'from {stream_type(strategy.experience)} stream ended.',
-#                   file=self.file, flush=True)
-#         else:
-#             print(f'> Eval on experience {exp_id} (Task '
-#                   f'{task_id}) '
-#                   f'from {stream_type(strategy.experience)} stream ended.',
-#                   file=self.file, flush=True)
-#         self.print_current_metrics()
-#         self.metric_vals = {}
-#
-#     def before_training(self, strategy: 'SupervisedTemplate',
-#                         metric_values: List['MetricValue'], **kwargs):
-#         super().before_training(strategy, metric_values, **kwargs)
-#         print('-- >> Start of training phase << --', file=self.file, flush=True)
-#
-#     def before_eval(self, strategy: 'SupervisedTemplate',
-#                     metric_values: List['MetricValue'], **kwargs):
-#         super().before_eval(strategy, metric_values, **kwargs)
-#         print('-- >> Start of eval phase << --', file=self.file, flush=True)
-#
-#     def after_training(self, strategy: 'SupervisedTemplate',
-#                        metric_values: List['MetricValue'], **kwargs):
-#         super().after_training(strategy, metric_values, **kwargs)
-#         print('-- >> End of training phase << --', file=self.file, flush=True)
-#
-#     def after_eval(self, strategy: 'SupervisedTemplate',
-#                    metric_values: List['MetricValue'], **kwargs):
-#         super().after_eval(strategy, metric_values, **kwargs)
-#         print('-- >> End of eval phase << --', file=self.file, flush=True)
-#         self.print_current_metrics()
-#         self.metric_vals = {}
-#
-#     def _on_exp_start(self, strategy: 'SupervisedTemplate'):
-#         action_name = 'training' if strategy.is_training else 'eval'
-#         exp_id = strategy.experience.current_experience
-#         task_id = phase_and_task(strategy)[1]
-#         stream = stream_type(strategy.experience)
-#         if task_id is None:
-#             print('-- Starting {} on experience {} from {} stream --'
-#                   .format(action_name, exp_id, stream),
-#                   file=self.file,
-#                   flush=True)
-#         else:
-#             print('-- Starting {} on experience {} (Task {}) from {} stream --'
-#                   .format(action_name, exp_id, task_id, stream),
-#                   file=self.file,
-#                   flush=True)
+def make_train_dataloader(
+    self,
+    num_workers=0,
+    shuffle=True,
+    pin_memory=None,
+    persistent_workers=False,
+    drop_last=False,
+    **kwargs
+):
+    """Data loader initialization.
 
+    Called at the start of each learning experience after the dataset
+    adaptation.
+
+    :param num_workers: number of thread workers for the data loading.
+    :param shuffle: True if the data should be shuffled, False otherwise.
+    :param pin_memory: If True, the data loader will copy Tensors into CUDA
+        pinned memory before returning them. Defaults to True.
+    """
+
+    assert self.adapted_dataset is not None
+
+    torch.utils.data.DataLoader
+
+    other_dataloader_args = self._obtain_common_dataloader_parameters(
+        batch_size=self.train_mb_size,
+        num_workers=num_workers,
+        shuffle=shuffle,
+        pin_memory=pin_memory,
+        persistent_workers=persistent_workers,
+        drop_last=drop_last,
+    )
+
+    self.dataloader = DataLoader(
+        self.adapted_dataset, **other_dataloader_args
+    )
+
+
+def process_saving_path(sstring: str) -> str:
+    return '__'.join(s.split('=')[1] for s in sstring.split('__'))
+
+
+OmegaConf.register_new_resolver("process_saving_path", process_saving_path)
 OmegaConf.register_new_resolver("method_path", lambda x: x.split('.')[-1])
 
 
@@ -129,18 +82,20 @@ def avalanche_training(cfg: DictConfig):
     log.info(OmegaConf.to_yaml(cfg))
     log.info(os.getcwd())
 
-    # check config
-
     device = cfg.get('device', 'cpu')
 
     scenario = cfg['scenario']
     dataset = scenario['dataset']
-    scenario_name = scenario['scenario']
     n_tasks = scenario['n_tasks']
     task_incremental_learning = scenario['return_task_id']
+    permuted_dataset = scenario.get('permuted_dataset', False)
+
+    scenario_name = dataset
+    if scenario.get('permuted_dataset', False):
+        scenario_name = 'rp_' + scenario_name
 
     shuffle = scenario['shuffle']
-    shuffle_first = scenario.get('shuffle_first', False)
+    shuffle_first = scenario.get('shuffle_first', True)
 
     model_cfg = cfg['model']
 
@@ -151,7 +106,9 @@ def avalanche_training(cfg: DictConfig):
     batch_size = training['batch_size']
 
     num_workers = training.get('num_workers', 0)
-    pin_memory = training.get('pin_memory', True)
+    pin_memory = training.get('pin_memory', False)
+    use_standard_dataloader = training.get('use_standard_dataloader', True)
+    dev_split = training.get('dev_split', None)
 
     experiment = cfg['experiment']
     n_experiments = experiment.get('experiments', 1)
@@ -162,7 +119,6 @@ def avalanche_training(cfg: DictConfig):
     eval_every = experiment.get('eval_every', 5)
 
     save_states = experiment.get('save_states', False)
-    console_log = experiment.get('console_log', False)
 
     if device == 'cpu':
         warnings.warn("Device set to cpu.")
@@ -175,27 +131,8 @@ def avalanche_training(cfg: DictConfig):
 
     device = torch.device(device)
 
-    all_results = []
-
     base_path = os.getcwd()
     cfg_path = os.path.join(os.getcwd(), '.hydra', 'config.yaml')
-
-    # if os.path.exists(cfg_path):
-    #     with open(cfg_path, 'r') as f:
-    #         past_cfg = yaml.safe_load(f)
-    #
-    #         keys_set = set([k for k in past_cfg.keys() if k != 'device'])
-    #         b = keys_set == set([k for k in cfg.keys() if k != 'device'])
-    #
-    #         assert b, (
-    #             f'You are launching an experiment having output path {os.getcwd()}, '
-    #             f'but the experiment config and the one saved in the folder have not the same keys.')
-    #
-    #         b = all([past_cfg[k] == cfg[k] for k in keys_set])
-    #
-    #         assert b, (
-    #             f'You are launching an experiment having output path {os.getcwd()}, '
-    #             f'but the experiment config and the one saved in the folder not equal: {past_cfg - cfg}')
 
     is_cil = not task_incremental_learning
     task_incremental_learning = task_incremental_learning if plugin_name != 'cml' \
@@ -204,7 +141,8 @@ def avalanche_training(cfg: DictConfig):
     force_sit = True if plugin_name == 'der' else False
     force_sit = False
 
-    head_classes = cfg.model.get('head_classes', None)
+    experiments_results = []
+    tasks_split_dict = {}
 
     for exp_n in range(1, n_experiments + 1):
         log.info(f'Starting experiment {exp_n} (of {n_experiments})')
@@ -222,6 +160,8 @@ def avalanche_training(cfg: DictConfig):
         results_path = os.path.join(experiment_path, 'last_results.json')
         complete_results_path = os.path.join(experiment_path,
                                              'complete_results.json')
+        complete_results_dev_path = os.path.join(experiment_path,
+                                                 'complete_results_dev.json')
 
         train_results_path = os.path.join(experiment_path, 'train_results.json')
 
@@ -233,13 +173,21 @@ def avalanche_training(cfg: DictConfig):
 
         tasks = get_dataset_nc_scenario(name=dataset, n_tasks=n_tasks,
                                         til=task_incremental_learning,
-                                        shuffle=shuffle_first if exp_n == 0 else shuffle,
+                                        shuffle=shuffle,
                                         seed=seed, force_sit=force_sit,
                                         method_name=plugin_name,
-                                        dev_split=training.get('dev_split', None))
+                                        permuted_dataset=permuted_dataset,
+                                        dev_split=dev_split)
 
         log.info(f'Original classes: {tasks.classes_order_original_ids}')
         log.info(f'Original classes per exp: {tasks.original_classes_in_exp}')
+
+        tasks_split_dict[seed] = {
+            'original_classes': tasks.classes_order_original_ids,
+            'tasks_classes': [list(v) for v in tasks.original_classes_in_exp]}
+
+        with open(os.path.join(base_path, 'tasks_split.json'), 'w') as f:
+            json.dump(tasks_split_dict, f, ensure_ascii=False, indent=4)
 
         if load and os.path.exists(results_path):
             print('model loaded')
@@ -250,54 +198,107 @@ def avalanche_training(cfg: DictConfig):
             if os.path.exists(train_results_path):
                 with open(train_results_path) as json_file:
                     train_res = json.load(json_file)
+
+            if os.path.exists(results_path):
+                with open(results_path, 'r') as json_file:
+                    last_results = json.load(json_file)
+                    experiments_results.append(last_results)
+
+                    log.info(last_results[-1])
             else:
                 train_res = results_after_each_task
         else:
 
             img, _, _ = tasks.train_stream[0].dataset[0]
 
-            if plugin_name == 'der':
-                assert 'head_classes' in model_cfg, (
-                    'Whn using DER you must specify '
-                    'the head dimension of the model, '
-                    'by setting head_classes parameter'
-                    'in the config file.')
-
-            if head_classes is not None:
-                del cfg.model.head_classes
-
             backbone = hydra.utils.instantiate(cfg.model)
 
-            model = get_cl_model(backbone=backbone,
-                                 model_name='',
-                                 input_shape=tuple(img.shape),
-                                 method_name=plugin_name,
-                                 head_classes=head_classes,
-                                 is_class_incremental_learning=is_cil,
-                                 **model_cfg)
+            # TODO: add cml, add podnet
 
-            wandb_name = f'{cfg.scenario.dataset}/{cfg.scenario.n_tasks}_{cfg.trainer_name}_{backbone.__class__.__name__}_{exp_n}'
+            x = torch.randn((1,) + tuple(img.shape))
+            o = backbone(x)
+
+            size = np.prod(o.shape)
+
+            if plugin_name not in ['cope', 'mcml', 'continualmetriclearning']:
+                head = hydra.utils.instantiate(cfg.head, in_features=size)
+
+                if plugin_name == 'margin':
+                    assert isinstance(head, ScaledClassifier)
+                elif plugin_name == 'icarl':
+                    assert isinstance(head, IncrementalClassifier)
+                elif plugin_name == 'der':
+                    assert isinstance(head, torch.nn.Linear)
+
+                if plugin_name in ['margin', 'incrementalmargin', 'der', 'logitdistillation']:
+                    model = PytorchCombinedModel(backbone, head)
+                else:
+                    model = AvalanceCombinedModel(backbone, head)
+            elif plugin_name == 'continualmetriclearning':
+
+                def heads_generator(i, o):
+                    class Wrapper(nn.Module):
+                        def __init__(self):
+                            super().__init__()
+                            self.model = nn.Sequential(
+                                nn.ReLU(),
+                                nn.Linear(i, o),
+                            )
+
+                        def forward(self, x, task_labels=None, **kwargs):
+                            return self.model(x)
+
+                    return Wrapper()
+
+                head = CustomMultiHeadClassifier(size, heads_generator, size)
+                model = AvalanceCombinedModel(backbone, head)
+
+            metrics = hydra.utils.instantiate(cfg.evaluation.metrics)
+
+            loggers = []
+
+            if cfg.evaluation.get('enable_textlog', True):
+                loggers.append(TextLogger())
+
+            if cfg.get('enable_wandb', True):
+                wandb_group = cfg.get('wandb_group', None)
+                wandb_prefix = cfg.get('wandb_prefix', '')
+
+                if dev_split is not None:
+                    tags = ['grid_search']
+                else:
+                    tags = ['train']
+
+                _tags = cfg.get('wadnb_tags', None)
+                if _tags is not None:
+                    if not isinstance(_tags, ListConfig):
+                        _tags = [_tags]
+                    tags += _tags
+
+                wandb_name = f'{cfg.scenario.dataset}/{cfg.scenario.n_tasks}_{cfg.trainer_name}_{backbone.__class__.__name__}_{exp_n}'
+
+                # if permuted_dataset:
+                #     wandb_name = 'RP_' + wandb_name
+
+                if wandb_prefix is not None and wandb_prefix != '':
+                    wandb_name = wandb_prefix + wandb_name
+
+                wandb_dict = OmegaConf.to_container(cfg, resolve=True)
+                wandb_dict['saving_path'] = experiment_path
+
+                v = WandBLogger(project_name=cfg.core.project_name,
+                                run_name=wandb_name,
+                                params={'config': wandb_dict,
+                                        'reinit': True,
+                                        'group': wandb_group,
+                                        'tags': tags})
+
+                loggers.append(v)
 
             eval_plugin = EvaluationPlugin(
-                # StreamAccuracy(),
-                # TrainedExperienceAccuracy(),
-                accuracy_metrics(stream=True,
-                                 trained_experience=True,
-                                 experience=True),
-                bwt_metrics(experience=True, stream=True),
-                # MAC_metrics(minibatch=True, epoch=True, experience=True),
-                # forgetting_metrics(experience=True, stream=True),
-                # ExperienceTrainableParameters(),
-                StreamTrainableParameters(),
-                # timing_metrics(minibatch=True, epoch=True, experience=False),
-                # loggers=[TextLogger()] if console_log else [],
-                loggers=[TextLogger(),
-                         WandBLogger(project_name=cfg.core.project_name,
-                                     run_name=wandb_name,
-                                     params={
-                                         'config': OmegaConf.to_container(cfg,
-                                                                          resolve=True)})],
-                strict_checks=True
+                metrics,
+                loggers=loggers,
+                strict_checks=False
             )
 
             opt = hydra.utils.instantiate(cfg.optimizer,
@@ -305,8 +306,26 @@ def avalanche_training(cfg: DictConfig):
 
             criterion = CrossEntropyLoss()
 
+            method_name = hydra.utils.get_class(cfg.method._target_).__name__.lower()
+
+            debug_plugins = []
+            if cfg.get('debug_path', None) is not None:
+                debug_path = os.path.join(experiment_path, cfg.debug_path)
+                if plugin_name == 'replay':
+                    debug_plugins = [
+                        # LogitsDebugPlugin(debug_path),
+                                     TrainDebugPlugin(debug_path)]
+                if plugin_name == 'der':
+                    debug_plugins = [TrainDebugPlugin(debug_path), GradientsDebugPlugin(debug_path)]
+                    # debug_plugins = [TrainDebugPlugin(debug_path)]
+                if plugin_name == 'margin' or 'logitdistillation' == plugin_name:
+                    debug_plugins = [TrainDebugPlugin(debug_path),
+                                     ScalerDebugPlugin(debug_path)]
+                if plugin_name == 'er_ace':
+                    debug_plugins = [TrainDebugPlugin(debug_path)]
+
             if cfg is not None and '_target_' in cfg.method:
-                if plugin_name == 'ICaRL':
+                if plugin_name == 'icarl':
                     strategy = hydra.utils.instantiate(cfg.method,
                                                        feature_extractor=model.feature_extractor,
                                                        classifier=model.classifier,
@@ -317,40 +336,42 @@ def avalanche_training(cfg: DictConfig):
                                                        device=device,
                                                        eval_every=eval_every)
                 else:
-                    strategy = hydra.utils.instantiate(cfg.method,
-                                                       model=model,
-                                                       criterion=criterion,
-                                                       optimizer=opt,
-                                                       train_epochs=epochs,
-                                                       train_mb_size=batch_size,
-                                                       evaluator=eval_plugin,
-                                                       device=device,
-                                                       eval_every=eval_every)
+                    if method_name == 'podnet':
+                        strategy = hydra.utils.instantiate(cfg.method,
+                                                           feature_extractor=model.feature_extractor,
+                                                           classifier=model.classifier,
+                                                           criterion=criterion,
+                                                           optimizer=opt,
+                                                           train_epochs=epochs,
+                                                           train_mb_size=batch_size,
+                                                           evaluator=eval_plugin,
+                                                           device=device,
+                                                           eval_every=eval_every)
+                    else:
+                        strategy = hydra.utils.instantiate(cfg.method,
+                                                           model=model,
+                                                           criterion=criterion,
+                                                           optimizer=opt,
+                                                           train_epochs=epochs,
+                                                           train_mb_size=batch_size,
+                                                           evaluator=eval_plugin,
+                                                           device=device,
+                                                           plugins=debug_plugins,
+                                                           eval_every=eval_every)
             else:
                 assert False, f'Method not implemented yet {cfg}'
 
-            if isinstance(strategy, DER) and head_classes is None:
-                assert 'head_classes' in cfg.model, (
-                    'When using DER strategy, '
-                    'parameter model.head_classes must be specified.')
+            # if isinstance(strategy, DER) and head_classes is None:
+            #     assert 'head_classes' in cfg.model, (
+            #         'When using DER strategy, '
+            #         'parameter model.head_classes must be specified.')
 
-            # trainer = get_trainer(**method,
-            #                       tasks=tasks,
-            #                       sit=is_cil,
-            #                       cfg=cfg)
-            #
-            # strategy = trainer(model=model,
-            #                    criterion=criterion,
-            #                    optimizer=opt,
-            #                    train_epochs=epochs
-            #                    if method['name'].lower() != 'cope' else 1,
-            #                    train_mb_size=batch_size,
-            #                    eval_every=eval_every,
-            #                    evaluator=eval_plugin,
-            #                    device=device)
+            if use_standard_dataloader:
+                strategy.make_train_dataloader = MethodType(make_train_dataloader, strategy)
 
             results_after_each_task = []
             all_results = {}
+            all_results_dev = {}
 
             indexes = np.arange(len(tasks.train_stream))
 
@@ -382,24 +403,21 @@ def avalanche_training(cfg: DictConfig):
                     # for i, experience in enumerate(tasks.train_stream):
                     experience = tasks.train_stream[i]
 
-                    # eval_streams = [[e] for e in tasks.test_stream[:i + 1]]
-
-                    # res = strategy.train(experiences=experience,
-                    #                      eval_streams=eval_streams,
-                    #                      pin_memory=pin_memory,
-                    #                      num_workers=num_workers)
-
                     res = strategy.train(experiences=experience,
-                                         eval_streams=[tasks.test_stream],
+                                         eval_streams=[
+                                             tasks.test_stream[:i + 1]],
                                          pin_memory=pin_memory,
                                          num_workers=num_workers)
 
-                    # strag_eval = strategy.eval(tasks.test_stream[:i + 1],
-                    #                            pin_memory=pin_memory,
-                    #                            num_workers=num_workers)
-
                     all_results = strategy.evaluator.get_all_metrics()
-                    print(all_results, res)
+
+                    if eval_every < 0:
+                        all_results_dev = strategy.eval(
+                            tasks.test_stream[:i + 1],
+                            pin_memory=pin_memory,
+                            num_workers=num_workers)
+
+                    log.info(res)
 
                     if save_states:
                         torch.save(strategy,
@@ -423,6 +441,11 @@ def avalanche_training(cfg: DictConfig):
             with open(complete_results_path, 'w') as f:
                 json.dump(all_results, f, ensure_ascii=False, indent=4)
 
+            with open(complete_results_dev_path, 'w') as f:
+                json.dump(all_results_dev, f, ensure_ascii=False, indent=4)
+
+            experiments_results.append(results_after_each_task)
+
         for res in results_after_each_task:
             average_accuracy = []
             for k, v in res.items():
@@ -431,34 +454,20 @@ def avalanche_training(cfg: DictConfig):
             average_accuracy = np.mean(average_accuracy)
             res['average_accuracy'] = average_accuracy
 
-        # for k, v in train_res[-1].items():
-        #     log.info(f'Train Metric {k}:  {v}')
+    mean_res = defaultdict(list)
 
-        # for k, v in train_res.items():
-        #     if k.startswith('Time_MB') or k.startswith('Time_Epoch'):
-        #         log.info(f'Train {k}: {np.mean(v[1]), np.std(v[1])}')
-        #
-        # for k, v in results_after_each_task[-1].items():
-        #     log.info(f'Test Metric {k}:  {v}')
-        #
-        # all_results.append(results_after_each_task)
+    for i, r in enumerate(experiments_results):
+        for k, v in r[-1].items():
+            mean_res[k].append(v)
 
-    # log.info(f'Average across the experiments.')
-    #
-    # mean_res = defaultdict(list)
-    #
-    # for i, r in enumerate(all_results):
-    #
-    #     for k, v in r[-1].items():
-    #         mean_res[k].append(v)
-    #
-    # m = {k: np.mean(v) for k, v in mean_res.items()}
-    # s = {k: np.std(v) for k, v in mean_res.items()}
-    #
-    # for k, v in results_after_each_task[-1].items():
-    #     _m = m[k]
-    #     _s = s[k]
-    #     log.info(f'Metric {k}: mean: {_m:.2f}, std: {_s:.2f}')
+    averaged_results = {k: {'mean': np.mean(v) * 100,
+                            'std': np.std(v) * 100} for k, v in mean_res.items()}
+
+    for k, d in averaged_results.items():
+        log.info(f'Metric {k}: mean: {d["mean"]:.2f}, std: {d["std"]:.2f}')
+
+    with open(os.path.join(base_path, 'averaged_results.json'), 'w') as f:
+        json.dump(averaged_results, f, ensure_ascii=False, indent=4)
 
 
 if __name__ == "__main__":

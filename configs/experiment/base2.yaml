@@ -2,3 +2,4 @@ experiments: 2
 save: Yes
 load: Yes
 plot: Yes
+eval_every: 5

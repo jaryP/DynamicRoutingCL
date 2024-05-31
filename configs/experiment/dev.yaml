@@ -3,4 +3,4 @@ save: Yes
 load: Yes
 plot: Yes
 dev_split: 0.1
-eval_every: 0
+eval_every: 5

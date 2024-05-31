@@ -24,7 +24,7 @@ from methods.plugins.cml_utils import BatchNormModelWrap
 from methods.plugins.cope import ContinualPrototypeEvolution
 from methods.plugins.er import EmbeddingRegularizationPlugin
 from methods.plugins.ewc import EWCCustomPlugin
-from methods.plugins.ssil import SeparatedSoftmax
+# from methods.plugins.ssil import SeparatedSoftmaxPlugin
 from models.utils import AvalanceCombinedModel
 
 
@@ -142,12 +142,17 @@ class ContinualMetricLearning(SupervisedTemplate):
             plugins=plugins,
             evaluator=evaluator, eval_every=eval_every)
 
+        self.offsets = {}
+
     def train_dataset_adaptation(self, **kwargs):
         """ Initialize `self.adapted_dataset`. """
 
         exp_n = self.experience.current_experience
 
         if not hasattr(self.experience, 'dev_dataset'):
+            for t in self.experience.task_labels:
+                self.offsets[t] = len(self.experience.previous_classes)
+
             dataset = self.experience.dataset
 
             idx = np.arange(len(dataset))
@@ -185,6 +190,10 @@ class ContinualMetricLearning(SupervisedTemplate):
     def forward(self):
         res = super().forward()
         if not self.model.training:
+            offsets = [self.offsets.get(t.item(), 0) for t in self.mb_task_id]
+            offsets = torch.tensor(offsets, device=self.mb_y.device)
+            self.mbatch[1] += offsets
+
             res = self.rp.calculate_classes(self, res)
         return res
 
@@ -269,38 +278,6 @@ class MemoryContinualMetricLearning(SupervisedTemplate):
         if not self.model.training:
             res = self.rp.calculate_classes(self, res)
         return res
-
-
-class SeparatedSoftmaxIncrementalLearning(SupervisedTemplate):
-
-    def __init__(self,
-                 model: AvalanceCombinedModel,
-                 optimizer: Optimizer,
-                 criterion,
-                 train_mb_size: int = 1,
-                 train_epochs: int = 1,
-                 eval_mb_size: int = None,
-                 device=None,
-                 mem_size: int = 500,
-                 plugins: Optional[List[SupervisedTemplate]] = None,
-                 evaluator: EvaluationPlugin = default_evaluator, eval_every=-1):
-
-        rp = SeparatedSoftmax(mem_size=mem_size)
-
-        self.rp = rp
-
-        if plugins is None:
-            plugins = [rp]
-        else:
-            plugins.append(rp)
-
-        super().__init__(
-            model, optimizer, criterion,
-            train_mb_size=train_mb_size,
-            train_epochs=train_epochs,
-            eval_mb_size=eval_mb_size, device=device,
-            plugins=plugins,
-            evaluator=evaluator, eval_every=eval_every)
 
 
 class CoPE(SupervisedTemplate):

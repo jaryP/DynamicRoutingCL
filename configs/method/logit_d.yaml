@@ -1,0 +1,4 @@
+_target_: methods.LogitDistillation
+mem_size: null
+alpha: 1
+
